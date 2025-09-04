@@ -1,0 +1,46 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>	
+		<TargetFramework>net6.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<AssemblyName>Emberglass</AssemblyName>
+		<Version>1.0.0</Version>
+		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+		<RestoreSources>
+			https://api.nuget.org/v3/index.json;
+			https://nuget.bepinex.dev/v3/index.json;
+		</RestoreSources>
+		<EnforceCodeStyleInBuild>True</EnforceCodeStyleInBuild>
+		<BepInExPluginGuid>io.zfolmt.Emberglass</BepInExPluginGuid>
+		<LangVersion>preview</LangVersion>
+		<EnablePreviewFeatures>true</EnablePreviewFeatures>
+		<UseAppHost>false</UseAppHost>
+        <NuGetAudit>False</NuGetAudit>
+    </PropertyGroup>
+	
+    <Target Name="BuildToServer" AfterTargets="Build">
+        <PropertyGroup>
+            <DefaultOutputDir>C:\Program Files (x86)\Steam\steamapps\common\VRisingDedicatedServer\BepInEx\plugins</DefaultOutputDir>
+            <TempOutputDir>$(TargetDir)ServerPlugins</TempOutputDir>
+        </PropertyGroup>
+        <Copy SourceFiles="$(TargetDir)$(ProjectName).dll" DestinationFolder="$(DefaultOutputDir)" Condition="Exists('$(DefaultOutputDir)')" ContinueOnError="true" />
+        <Message Text="Server output directory '$(DefaultOutputDir)' not found. Copying to '$(TempOutputDir)' instead." Importance="High" Condition="!Exists('$(DefaultOutputDir)')" />
+        <Copy SourceFiles="$(TargetDir)$(ProjectName).dll" DestinationFolder="$(TempOutputDir)" Condition="!Exists('$(DefaultOutputDir)')" ContinueOnError="true" />
+    </Target>
+
+    <Target Name="BuildToClient" AfterTargets="Build">
+        <PropertyGroup>
+            <DefaultOutputDir>C:\Program Files (x86)\Steam\steamapps\common\VRising\BepInEx\plugins</DefaultOutputDir>
+            <TempOutputDir>$(TargetDir)ClientPlugins</TempOutputDir>
+        </PropertyGroup>
+        <Copy SourceFiles="$(TargetDir)$(ProjectName).dll" DestinationFolder="$(DefaultOutputDir)" Condition="Exists('$(DefaultOutputDir)')" ContinueOnError="true" />
+        <Message Text="Client output directory '$(DefaultOutputDir)' not found. Copying to '$(TempOutputDir)' instead." Importance="High" Condition="!Exists('$(DefaultOutputDir)')" />
+        <Copy SourceFiles="$(TargetDir)$(ProjectName).dll" DestinationFolder="$(TempOutputDir)" Condition="!Exists('$(DefaultOutputDir)')" ContinueOnError="true" />
+    </Target>
+	
+    <ItemGroup>
+        <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.733" IncludeAssets="compile" />
+        <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" />
+        <PackageReference Include="VRising.Unhollowed.Client" Version="1.1.*" />
+    </ItemGroup>	
+</Project>
+

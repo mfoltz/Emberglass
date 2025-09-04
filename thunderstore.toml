@@ -1,0 +1,17 @@
+[package]
+namespace = "zfolmt"
+name = "Emberglass"
+versionNumber = "1.0.0"
+description = "WIP"
+websiteUrl = "https://github.com/mfoltz/Emberglass"
+containsNsfwContent = false
+
+[package.dependencies]
+BepInEx-BepInExPack_V_Rising = "1.733.2"
+
+[publish]
+communities = ["v-rising"]
+repository = "https://thunderstore.io"
+
+[publish.categories]
+v-rising = ["oakveil-update", "mods", "server", "client"]
