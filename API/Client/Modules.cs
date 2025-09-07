@@ -35,7 +35,7 @@ public static class ClientModules
             static ClientHandshakeModule _instance;
             static Harmony _harmony;
             static bool _ready;
-            static PrefabGUID TombCoffinSpawn { get; } = new(722466953);
+            static PrefabGUID TombCoffinSpawn { get; } = new(722466953); // AB_Interact_TombCoffinSpawn_Travel; one-off is okay but if we need more PrefabGUIDs elsewhere should embed as file w/ fields instead
             public override void Initialize()
             {
                 _harmony = Harmony.CreateAndPatchAll(typeof(Patch), MyPluginInfo.PLUGIN_GUID);
