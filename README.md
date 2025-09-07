@@ -15,5 +15,5 @@ The project is distributed through [Thunderstore][thunderstore] and provides uti
 ## Installation
 
 1. Install [BepInEx](https://bepinex.github.io/) for V Rising.
-2. Download Emery from Thunderstore or build from source (see below).
+2. Download Emberglass from Thunderstore and unzip contents.
 3. Place `Emberglass.dll` in your `BepInEx/plugins` directory.
