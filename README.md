@@ -1,6 +1,6 @@
-# Emberglass
+# Emberglass (WIP)
 
-Emberglass is a modding framework for [V Rising](https://playvrising.com/) built as a BepInEx plugin. It provides networking helpers, shared APIs and ECS extensions commonly used in other mods.
+Emberglass is a modding framework for [V Rising](https://playvrising.com/) built as a BepInEx plugin.
 
 ## Project Overview
 
