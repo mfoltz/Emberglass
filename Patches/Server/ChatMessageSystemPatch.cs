@@ -47,7 +47,6 @@ internal class ChatMessageSystemPatch
             try
             {
                 OnChatMessageHandler?.Invoke(entity, chatMessage, fromCharacter);
-                entity.Destroy(true);
             }
             catch (Exception ex)
             {
