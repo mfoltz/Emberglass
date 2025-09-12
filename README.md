@@ -6,7 +6,7 @@ Emberglass is a modding framework for [V Rising](https://playvrising.com/) built
 
 The project is distributed through [Thunderstore][thunderstore] and provides utilities for:
 
-* Typed packet networking via `VNetwork`; see PingPong under Network/Examples for guidance.
+* Allows server & client mods to share information and coordinate logic; just register blittable types with associated actions and Emberglass handles the rest.
 * Runtime plugin sharing of preloaded mods (server operator places them in local folder) from servers to consenting clients.
 * Supports custom keybinds & menu options with associated actions.
 
