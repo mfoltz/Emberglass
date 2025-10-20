@@ -10,6 +10,8 @@ using static Emberglass.API.Server.ServerModules.ConnectionModules;
 using static Emberglass.API.Shared.VEvents;
 
 namespace Emberglass.Services;
+
+// UserInfoUtility, UserInfoElement? Consider swapping
 public static class PlayerService
 {
     static EntityManager EntityManager => VWorld.EntityManager;
