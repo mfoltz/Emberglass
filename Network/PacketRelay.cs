@@ -33,7 +33,7 @@ internal static class PacketRelay
     static readonly ConcurrentDictionary<ulong, ECDiffieHellman> _ecdhInstances = [];
 
     static int _nextMsgId = 1;
-    const int LIFETIME = 100; // ~2MB share size limit
+    const int LIFETIME = 100; // ~2MB share size limit w/ bitrate current constants achieve as baseline, can be tuned or further optimized as required.
 
     static bool _initialized = false;
     unsafe struct KeyExchange
