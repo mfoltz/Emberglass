@@ -44,7 +44,7 @@ internal static class NetworkTesting
             yield return null;
         }
 
-        // should subscribe or to character creation or log in instead
+        // Subscribing to character creation here would have made more sense but made that module after, this should be enough to get the idea across at least.
 
         VNetwork.RegisterClientbound<Pong>((sender, pong) =>
         {
