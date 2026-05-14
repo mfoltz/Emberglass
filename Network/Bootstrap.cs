@@ -1,4 +1,4 @@
-﻿using Emberglass.API.Shared;
+using Emberglass.API.Shared;
 using Il2CppInterop.Runtime;
 using ProjectM;
 using ProjectM.Network;
@@ -12,12 +12,12 @@ internal static class Bootstrapper
     static bool _initialized;
 
     static readonly ComponentType[] _componentTypes =
-    {
+    [
         ComponentType.ReadOnly(Il2CppType.Of<FromCharacter>()),
         ComponentType.ReadOnly(Il2CppType.Of<NetworkEventType>()),
         ComponentType.ReadOnly(Il2CppType.Of<SendNetworkEventTag>()),
         ComponentType.ReadOnly(Il2CppType.Of<ChatMessageEvent>())
-    };
+    ];
 
     static readonly NetworkEventType _eventType = new()
     {

@@ -18,13 +18,11 @@ internal class Plugin : BasePlugin
     public override void Load()
     {
         GameBootstrapPatch.Initialize();
-
         Logger.LogInfo($"{MyPluginInfo.PLUGIN_NAME}[{MyPluginInfo.PLUGIN_VERSION}] loaded!");
     }
     public override bool Unload()
     {
         GameBootstrapPatch.Uninitialize();
-
         return true;
     }
 }

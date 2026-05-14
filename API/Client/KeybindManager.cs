@@ -1,20 +1,21 @@
-﻿using Emberglass.Utilities;
+using System.Text;
+using Emberglass.Utilities;
 using ProjectM;
 using Stunlock.Localization;
-using System.Text;
 using UnityEngine;
 
 namespace Emberglass.API.Client;
 public static class KeybindManager
 {
     static readonly HashSet<string> _activeCategories = [];
-    public static IReadOnlyDictionary<LocalizationKey, Dictionary<string, Keybinding>> Categories => _categories;
-    static readonly Dictionary<LocalizationKey, Dictionary<string, Keybinding>> _categories = [];
+    public static IReadOnlyDictionary<LocalizationKey, List<IKeybindMenuEntry>> Categories => _categoryEntries;
+    static readonly Dictionary<LocalizationKey, List<IKeybindMenuEntry>> _categoryEntries = [];
     public static IReadOnlyDictionary<string, Keybinding> Keybinds => _keybinds;
     static readonly Dictionary<string, Keybinding> _keybinds = [];
 
     static readonly Dictionary<string, LocalizationKey> _categoryKeys = [];
     static readonly HashSet<string> _categoryHeaders = [];
+    static int _nextOrder;
 
     const ulong HASH_LONG = 14695981039346656037UL;
     const uint HASH_INT = 2166136261U;
@@ -74,6 +75,14 @@ public static class KeybindManager
         { KeyCode.LeftArrow, "←" },
         { KeyCode.RightArrow, "→" }
     };
+    /// <summary>
+    /// Registers a keybind and returns the created binding.
+    /// </summary>
+    /// <param name="name">The display name for the keybind.</param>
+    /// <param name="description">The display description for the keybind.</param>
+    /// <param name="category">The category identifier for the keybind.</param>
+    /// <param name="defaultKey">The default keyboard key.</param>
+    /// <returns>The registered keybinding.</returns>
     public static Keybinding AddKeybind(string name, string description, string category, KeyCode defaultKey)
     {
         if (_keybinds.TryGetValue(name, out var existing))
@@ -81,31 +90,58 @@ public static class KeybindManager
             return existing;
         }
 
-        if (!_categoryHeaders.Contains(category) && !_categoryKeys.TryGetValue(category, out var localizationKey))
-        {
-            localizationKey = LocalizationKeyManager.GetLocalizationKey(category);
-            _categoryKeys[category] = localizationKey;
-            _categoryHeaders.Add(category);
-            _categories[localizationKey] = [];
-        }
-        else
-        {
-            localizationKey = _categoryKeys[category];
-        }
-
-        var keybinds = _categories[localizationKey];
+        var localizationKey = GetOrCreateCategoryKey(category);
         var keybind = new Keybinding(name, description, category, defaultKey);
+        var order = GetNextOrder();
 
-        keybinds[name] = keybind;
+        _categoryEntries[localizationKey].Add(new KeybindEntry(keybind, order));
         _keybinds[name] = keybind;
         _activeCategories.Add(category);
 
         return keybind;
     }
+    /// <summary>
+    /// Adds a divider entry to the keybind menu without registering a persisted binding.
+    /// </summary>
+    /// <param name="label">The divider label text.</param>
+    /// <param name="category">The category identifier for the divider.</param>
+    public static void AddDivider(string label, string category)
+    {
+        var localizationKey = GetOrCreateCategoryKey(category);
+        var order = GetNextOrder();
+
+        _categoryEntries[localizationKey].Add(new KeybindDividerEntry(label, category, order));
+    }
     public static void Rebind(Keybinding keybind, KeyCode newKey)
     {
         keybind.Primary = newKey;
         Persistence.SaveKeybinds();
+    }
+    /// <summary>
+    /// Returns the next display order index for menu entries.
+    /// </summary>
+    /// <returns>The next order index to assign.</returns>
+    static int GetNextOrder()
+    {
+        return _nextOrder++;
+    }
+    /// <summary>
+    /// Ensures the category is registered and returns its localization key.
+    /// </summary>
+    /// <param name="category">The category identifier to register.</param>
+    /// <returns>The localization key for the category.</returns>
+    static LocalizationKey GetOrCreateCategoryKey(string category)
+    {
+        if (_categoryKeys.TryGetValue(category, out var localizationKey))
+        {
+            return localizationKey;
+        }
+
+        localizationKey = LocalizationKeyManager.GetLocalizationKey(category);
+        _categoryKeys[category] = localizationKey;
+        _categoryHeaders.Add(category);
+        _categoryEntries[localizationKey] = [];
+        return localizationKey;
     }
     public static ButtonInputAction ComputeInputFlag(string descriptionId)
     {
@@ -134,13 +170,13 @@ public static class KeybindManager
     }
     public static string GetLiteral(KeyCode key)
     {
-        return _keyLiterals.TryGetValue(key, out var literal) ? literal : key.ToString();
+        return _keyLiterals.TryGetValue(key, out string literal) ? literal : key.ToString();
     }
     static ulong Hash64(byte[] data)
     {
         ulong hash = HASH_LONG;
 
-        foreach (var b in data)
+        foreach (byte b in data)
         {
             hash ^= b;
             hash *= 1099511628211UL;
@@ -152,7 +188,7 @@ public static class KeybindManager
     {
         uint hash = HASH_INT;
 
-        foreach (var b in data)
+        foreach (byte b in data)
         {
             hash ^= b;
             hash *= 16777619U;
@@ -168,6 +204,8 @@ public static class KeybindManager
             return;
         }
 
+        var didMigrate = false;
+
         foreach (var (key, keybind) in loaded)
         {
             if (!_activeCategories.Contains(keybind.Category))
@@ -175,19 +213,53 @@ public static class KeybindManager
                 continue;
             }
 
-            if (!_categoryKeys.TryGetValue(keybind.Category, out var locKey))
-            {
-                locKey = LocalizationKeyManager.GetLocalizationKey(keybind.Category);
-                _categoryKeys[keybind.Category] = locKey;
-                _categoryHeaders.Add(keybind.Category);
-                _categories[locKey] = [];
-            }
-
-            if (_categories.TryGetValue(_categoryKeys[keybind.Category], out var keybinds) &&
-                keybinds.TryGetValue(keybind.Name, out var registered))
+            if (TryResolveRegisteredKeybind(key, keybind, out var registered, out var migrated))
             {
                 registered.ApplySaved(keybind);
+                didMigrate |= migrated;
             }
         }
+
+        if (didMigrate)
+        {
+            Persistence.SaveKeybinds();
+        }
+    }
+    /// <summary>
+    /// Resolves a registered keybind using the saved data and reports whether the lookup implies a migration.
+    /// </summary>
+    /// <param name="savedKey">The key name used in persistence storage.</param>
+    /// <param name="savedKeybind">The saved keybind payload.</param>
+    /// <param name="registered">The resolved registered keybind, if found.</param>
+    /// <param name="didMigrate">Whether the resolved lookup implies the saved key should be normalized.</param>
+    /// <returns><c>true</c> when a registered keybind is found; otherwise <c>false</c>.</returns>
+    static bool TryResolveRegisteredKeybind(
+        string savedKey,
+        Keybinding savedKeybind,
+        out Keybinding registered,
+        out bool didMigrate)
+    {
+        registered = null;
+        didMigrate = false;
+
+        if (savedKeybind == null)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(savedKeybind.Name) &&
+            _keybinds.TryGetValue(savedKeybind.Name, out registered))
+        {
+            didMigrate = !string.Equals(savedKey, savedKeybind.Name, StringComparison.Ordinal);
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(savedKey) &&
+            _keybinds.TryGetValue(savedKey, out registered))
+        {
+            return true;
+        }
+
+        return false;
     }
 }

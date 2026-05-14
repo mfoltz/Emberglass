@@ -13,7 +13,7 @@ public static class ClientModules
     [
         typeof(ConnectionModules.ClientHandshakeModule)
     ];
-    internal static void Initialize()
+    internal static void Bootstrap()
     {
         try
         {
@@ -24,7 +24,7 @@ public static class ClientModules
         }
         catch (Exception ex)
         {
-            VWorld.Log.LogError($"Failed to initialize client event modules: {ex}");
+            VWorld.Log.LogError($"Failed to bootstrap client event modules: {ex}");
         }
     }
     public static class ConnectionModules
@@ -35,7 +35,8 @@ public static class ClientModules
             static ClientHandshakeModule _instance;
             static Harmony _harmony;
             static bool _ready;
-            static PrefabGUID TombCoffinSpawn { get; } = new(722466953); // AB_Interact_TombCoffinSpawn_Travel; one-off is okay but if we need more PrefabGUIDs elsewhere should embed as file w/ fields
+            static Entity _readyLocalUser;
+            static PrefabGUID TombCoffinSpawn { get; } = new(722466953);
             public override void Initialize()
             {
                 _harmony = Harmony.CreateAndPatchAll(typeof(Patch), MyPluginInfo.PLUGIN_GUID);
@@ -43,7 +44,7 @@ public static class ClientModules
             public override void Uninitialize()
             {
                 _harmony?.UnpatchSelf();
-                _ready = false;
+                ResetSessionReady();
                 _instance = null;
             }
             public ClientHandshakeModule()
@@ -51,8 +52,48 @@ public static class ClientModules
                 _instance = this;
                 ModuleRegistry.Register(_instance);
             }
+            /// <summary>
+            /// Marks the current client session as ready to send its handshake.
+            /// </summary>
+            /// <param name="localUser">The local user entity for the current client session.</param>
+            /// <returns>True when this session should raise a new handshake event.</returns>
+            internal static bool TryMarkSessionReady(Entity localUser)
+            {
+                if (localUser == Entity.Null)
+                {
+                    return false;
+                }
+
+                if (_ready && _readyLocalUser != localUser)
+                {
+                    _ready = false;
+                }
+
+                if (_ready)
+                {
+                    return false;
+                }
+
+                _ready = true;
+                _readyLocalUser = localUser;
+                return true;
+            }
+            /// <summary>
+            /// Resets the cached client session marker.
+            /// </summary>
+            internal static void ResetSessionReady()
+            {
+                _ready = false;
+                _readyLocalUser = Entity.Null;
+                VNetwork.MarkClientSessionNotReady();
+            }
             static class Patch
             {
+                [HarmonyPatch(typeof(GameBootstrap), "OnDestroy")]
+                [HarmonyPostfix]
+                static void ResetOnGameBootstrapDestroyPostfix()
+                    => ResetSessionReady();
+
                 [HarmonyPatch(typeof(Destroy_TravelBuffSystem), nameof(Destroy_TravelBuffSystem.OnUpdate))]
                 [HarmonyPostfix]
                 static void HandleInputPostfix(Destroy_TravelBuffSystem __instance)
@@ -67,10 +108,10 @@ public static class ClientModules
                             PrefabGUID prefabGuid = entity.GetPrefabGuid();
 
                             if (prefabGuid.Equals(TombCoffinSpawn)
-                                && !_ready && _instance != null)
+                                && _instance != null
+                                && TryMarkSessionReady(VWorld.LocalUser))
                             {
                                 _instance.Raise(new());
-                                _ready = true;
                             }
                         }
                     }

@@ -1,4 +1,4 @@
-﻿using BepInEx.Unity.IL2CPP.Utils.Collections;
+using BepInEx.Unity.IL2CPP.Utils.Collections;
 using Stunlock.Core;
 using System.Collections;
 using UnityEngine;
@@ -11,7 +11,7 @@ public static class IExtensions
         where TKey : notnull
         where TValue : notnull
     {
-        var reversed = new Dictionary<TValue, TKey>();
+        Dictionary<TValue, TKey> reversed = new();
 
         foreach (var kvp in source)
         {

@@ -1,13 +1,12 @@
-﻿using HarmonyLib;
+using HarmonyLib;
 using ProjectM;
 using ProjectM.Network;
 using Stunlock.Network;
 using Unity.Entities;
 using static Emberglass.API.Shared.VEvents;
 using static Emberglass.API.Shared.VExtensions;
-using static Emberglass.Services.PlayerService;
+using static Emberglass.API.Server.Players;
 using Emberglass.API.Shared;
-using Emberglass.Services;
 
 namespace Emberglass.API.Server;
 public static class ServerModules
@@ -18,9 +17,11 @@ public static class ServerModules
         typeof(ConnectionModules.UserConnectedModule),
         typeof(ConnectionModules.UserDisconnectedModule),
         typeof(ConnectionModules.UserCreatedModule),
-        typeof(ConnectionModules.UserKickedModule)
+        typeof(ConnectionModules.UserKickedModule),
+        typeof(PlayerPresenceModules.PlayerCharacterAttachedModule),
+        typeof(PlayerPresenceModules.PlayerCharacterDetachedModule)
     ];
-    internal static bool Initialize()
+    internal static bool Bootstrap()
     {
         try
         {
@@ -33,7 +34,7 @@ public static class ServerModules
         }
         catch (Exception ex)
         {
-            VWorld.Log.LogError($"Failed to initialize server event modules: {ex}");
+            VWorld.Log.LogError($"Failed to bootstrap server event modules: {ex}");
             return false;
         }
     }
@@ -79,7 +80,7 @@ public static class ServerModules
                 [HarmonyPostfix]
                 static void OnUserConnected(ServerBootstrapSystem __instance, NetConnectionId netConnectionId)
                 {
-                    if (!__instance._NetEndPointToApprovedUserIndex.TryGetValue(netConnectionId, out var userIndex))
+                    if (!__instance._NetEndPointToApprovedUserIndex.TryGetValue(netConnectionId, out int userIndex))
                     {
                         return;
                     }
@@ -119,7 +120,7 @@ public static class ServerModules
                 [HarmonyPrefix]
                 static void OnUserDisconnected(ServerBootstrapSystem __instance, NetConnectionId netConnectionId)
                 {
-                    if (!__instance._NetEndPointToApprovedUserIndex.TryGetValue(netConnectionId, out var userIndex))
+                    if (!__instance._NetEndPointToApprovedUserIndex.TryGetValue(netConnectionId, out int userIndex))
                     {
                         return;
                     }
@@ -215,5 +216,71 @@ public static class ServerModules
                 }
             }
         }
+    }
+    public static class PlayerPresenceModules
+    {
+        public class PlayerCharacterAttached : IGameEvent
+        {
+            public PlayerInfo PlayerInfo { get; set; }
+            public Entity CharacterEntity { get; set; }
+        }
+        public class PlayerCharacterDetached : IGameEvent
+        {
+            public PlayerInfo PlayerInfo { get; set; }
+            public Entity CharacterEntity { get; set; }
+        }
+        public class PlayerCharacterAttachedModule : GameEvent<PlayerCharacterAttached>
+        {
+            static PlayerCharacterAttachedModule _instance;
+            public PlayerCharacterAttachedModule()
+            {
+                _instance = this;
+                ModuleRegistry.Register(_instance);
+            }
+            public override void Uninitialize()
+            {
+                _instance = null;
+            }
+            internal static bool IsReady
+                => _instance != null;
+            internal static void Publish(PlayerInfo playerInfo, Entity characterEntity)
+            {
+                _instance?.Raise(new PlayerCharacterAttached
+                {
+                    PlayerInfo = playerInfo,
+                    CharacterEntity = characterEntity
+                });
+            }
+        }
+        public class PlayerCharacterDetachedModule : GameEvent<PlayerCharacterDetached>
+        {
+            static PlayerCharacterDetachedModule _instance;
+            public PlayerCharacterDetachedModule()
+            {
+                _instance = this;
+                ModuleRegistry.Register(_instance);
+            }
+            public override void Uninitialize()
+            {
+                _instance = null;
+            }
+            internal static bool IsReady
+                => _instance != null;
+            internal static void Publish(PlayerInfo playerInfo, Entity characterEntity)
+            {
+                _instance?.Raise(new PlayerCharacterDetached
+                {
+                    PlayerInfo = playerInfo,
+                    CharacterEntity = characterEntity
+                });
+            }
+        }
+        internal static bool IsReady
+            => PlayerCharacterAttachedModule.IsReady
+                && PlayerCharacterDetachedModule.IsReady;
+        internal static void RaiseAttached(PlayerInfo playerInfo, Entity characterEntity)
+            => PlayerCharacterAttachedModule.Publish(playerInfo, characterEntity);
+        internal static void RaiseDetached(PlayerInfo playerInfo, Entity characterEntity)
+            => PlayerCharacterDetachedModule.Publish(playerInfo, characterEntity);
     }
 }

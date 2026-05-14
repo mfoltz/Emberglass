@@ -1,4 +1,4 @@
-﻿using BepInEx;
+using BepInEx;
 using Emberglass.API.Client;
 using Emberglass.API.Shared;
 using System.Text.Json;
@@ -76,6 +76,16 @@ internal static class Persistence
             VWorld.Log.LogWarning($"Failed to deserialize {fileKey} contents: {ex.Message}");
             return null;
         }
+        catch (JsonException ex)
+        {
+            VWorld.Log.LogWarning($"Failed to deserialize {fileKey} contents: {ex.Message}");
+            return null;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            VWorld.Log.LogWarning($"Failed to access {fileKey} contents: {ex.Message}");
+            return null;
+        }
     }
     static void SaveDictionary<T, U>(IReadOnlyDictionary<T, U> fileData, string fileKey)
     {
@@ -106,7 +116,7 @@ internal class MenuOptionJsonConverter : JsonConverter<MenuOption>
     const string TYPE_PROPERTY = "OptionType";
     public override MenuOption Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        using var jsonDoc = JsonDocument.ParseValue(ref reader);
+        using JsonDocument jsonDoc = JsonDocument.ParseValue(ref reader);
         var root = jsonDoc.RootElement;
 
         if (!root.TryGetProperty(TYPE_PROPERTY, out var typeProp))
@@ -114,7 +124,7 @@ internal class MenuOptionJsonConverter : JsonConverter<MenuOption>
             throw new JsonException($"Missing '{TYPE_PROPERTY}' in MenuOption JSON converter!");
         }
 
-        var typeName = typeProp.GetString();
+        string typeName = typeProp.GetString();
 
         return typeName switch
         {

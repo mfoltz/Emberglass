@@ -1,6 +1,5 @@
 using Emberglass.API.Shared;
 using Emberglass.Network;
-using Emberglass.Patches.Shared;
 using Il2CppInterop.Runtime;
 using ProjectM;
 using ProjectM.Network;
@@ -9,12 +8,18 @@ using Unity.Entities;
 using static Emberglass.API.Server.ServerModules.ConnectionModules;
 using static Emberglass.API.Shared.VEvents;
 
-namespace Emberglass.Services;
-
-// UserInfoUtility, UserInfoElement? Consider swapping
-public static class PlayerService
+namespace Emberglass.API.Server;
+public static class Players
 {
-    static EntityManager EntityManager => VWorld.EntityManager;
+    static EntityManager EntityManager
+        => VWorld.EntityManager;
+
+    static void UserElementInfo()
+    {
+        // UserInfoElement_ServerToClient, UserInfoElement
+        // UserInfoUtility.TryGetUserInfoBuffer
+    }
+
     public static IReadOnlyDictionary<ulong, PlayerInfo> SteamIdPlayerInfoCache => _steamIdPlayerInfoCache;
     static readonly Dictionary<ulong, PlayerInfo> _steamIdPlayerInfoCache = [];
     public static IReadOnlyDictionary<ulong, PlayerInfo> SteamIdOnlinePlayerInfoCache => _steamIdOnlinePlayerInfoCache;

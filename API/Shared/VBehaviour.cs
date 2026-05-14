@@ -9,6 +9,10 @@ public class VBehaviour : MonoBehaviour
 {
     public static VBehaviour Instance => _instance;
     static VBehaviour _instance;
+    /// <summary>
+    /// Gets the invoker used to schedule work on the main thread.
+    /// </summary>
+    public static IMainThreadInvoker MainThreadInvoker { get; internal set; }
     public static void Initialize()
     {
         ClassInjector.RegisterTypeInIl2Cpp<VBehaviour>();
@@ -21,6 +25,8 @@ public class VBehaviour : MonoBehaviour
             Destroy(_instance);
             _instance = null;
         }
+
+        MainThreadInvoker = null;
     }
     void Awake()
     {
@@ -28,7 +34,7 @@ public class VBehaviour : MonoBehaviour
     }
     void Update()
     {
-
+        MainThreadInvoker?.Drain();
     }
     void OnDestroy()
     {
