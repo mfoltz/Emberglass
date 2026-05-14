@@ -26,6 +26,15 @@ public class VBehaviour : MonoBehaviour
             _instance = null;
         }
 
+        DrainAndClearMainThreadInvoker();
+    }
+
+    /// <summary>
+    /// Drains queued main-thread work before clearing the invoker.
+    /// </summary>
+    internal static void DrainAndClearMainThreadInvoker()
+    {
+        MainThreadInvoker?.Drain();
         MainThreadInvoker = null;
     }
     void Awake()
