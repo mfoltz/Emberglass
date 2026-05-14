@@ -85,9 +85,15 @@ public static class ClientModules
             {
                 _ready = false;
                 _readyLocalUser = Entity.Null;
+                VNetwork.MarkClientSessionNotReady();
             }
             static class Patch
             {
+                [HarmonyPatch(typeof(GameBootstrap), "OnDestroy")]
+                [HarmonyPostfix]
+                static void ResetOnGameBootstrapDestroyPostfix()
+                    => ResetSessionReady();
+
                 [HarmonyPatch(typeof(Destroy_TravelBuffSystem), nameof(Destroy_TravelBuffSystem.OnUpdate))]
                 [HarmonyPostfix]
                 static void HandleInputPostfix(Destroy_TravelBuffSystem __instance)

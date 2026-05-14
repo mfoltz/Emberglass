@@ -12,6 +12,7 @@ public static class ServerConfigChangeHandlers
 {
     const string MissingBindingReason = "Server config binding was not registered.";
     const string ConfigUnavailableReason = "Server config entry is unavailable.";
+    const string InvalidBindingKey = "__invalid_binding__";
 
     static readonly Dictionary<BindingRegistrationKey, object> _bindings = new();
     static readonly HashSet<Type> _registeredTypes = new();
@@ -58,12 +59,12 @@ public static class ServerConfigChangeHandlers
     {
         if (request is null)
         {
-            return new ServerConfigChangeResponse<TValue>(string.Empty, default!, false, MissingBindingReason);
+            return new ServerConfigChangeResponse<TValue>(InvalidBindingKey, default!, false, MissingBindingReason);
         }
 
         if (string.IsNullOrWhiteSpace(request.BindingKey))
         {
-            return new ServerConfigChangeResponse<TValue>(string.Empty, request.Value, false, "Binding key is required.");
+            return new ServerConfigChangeResponse<TValue>(InvalidBindingKey, request.Value, false, "Binding key is required.");
         }
 
         var key = new BindingRegistrationKey(request.BindingKey, typeof(TValue));

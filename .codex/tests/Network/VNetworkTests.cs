@@ -51,6 +51,23 @@ public sealed class VNetworkTests : IDisposable
     }
 
     /// <summary>
+    /// Ensures request sends cannot enqueue work before an authenticated session is available.
+    /// </summary>
+    [Fact]
+    public async Task SendRequestAsync_ThrowsWhenNetworkIsNotReady()
+    {
+        using IDisposable runtimeContextScope = VWorld.BeginRuntimeContextOverride(isClient: true);
+
+        InvalidOperationException Exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await VNetwork.SendRequestAsync<TestPacket, TestPacket>(
+                default(User),
+                new TestPacket(1),
+                TimeSpan.FromSeconds(1)));
+
+        Assert.Contains("SendRequestAsync cannot be used before the network session is ready", Exception.Message);
+    }
+
+    /// <summary>
     /// Ensures client readiness follows the authenticated session lifecycle.
     /// </summary>
     [Fact]

@@ -28,15 +28,15 @@ public class VBehaviour : MonoBehaviour
 
         MainThreadInvoker = null;
     }
-    static void Awake()
+    void Awake()
     {
 
     }
-    static void Update()
+    void Update()
     {
         MainThreadInvoker?.Drain();
     }
-    static void OnDestroy()
+    void OnDestroy()
     {
 
     }

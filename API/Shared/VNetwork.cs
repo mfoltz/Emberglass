@@ -110,7 +110,11 @@ public static class VNetwork
     /// <param name="timeout">The amount of time to wait for a response.</param>
     /// <returns>A task that completes with the response payload.</returns>
     public static Task<TResponse> SendRequestAsync<TRequest, TResponse>(User target, TRequest request, TimeSpan timeout)
-        => RequestResponse.SendRequestAsync<TRequest, TResponse>(target, request, timeout);
+    {
+        EnsureReady(nameof(SendRequestAsync));
+        EnsureNetworkContext(nameof(SendRequestAsync));
+        return RequestResponse.SendRequestAsync<TRequest, TResponse>(target, request, timeout);
+    }
 
     /// <summary>
     /// Registers a handler that responds to typed requests with typed responses. Pending requests
@@ -298,6 +302,18 @@ public static class VNetwork
         }
 
         string message = $"[VNetwork] {callerName} is server-only and cannot be used on the client.";
+        VWorld.Log?.LogError(message);
+        throw new InvalidOperationException(message);
+    }
+
+    static void EnsureNetworkContext(string callerName)
+    {
+        if (VWorld.IsClient || VWorld.IsServer)
+        {
+            return;
+        }
+
+        string message = $"[VNetwork] {callerName} requires a client or server runtime context.";
         VWorld.Log?.LogError(message);
         throw new InvalidOperationException(message);
     }

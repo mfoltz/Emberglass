@@ -168,6 +168,10 @@ jobs:
             --no-restore \
             -p:Version="$version"
 
+      - name: Restore network tests
+        shell: bash
+        run: dotnet restore .codex/tests/Network/Emberglass.Network.Tests.csproj
+
       - name: Run network tests
         shell: bash
         run: dotnet test .codex/tests/Network/Emberglass.Network.Tests.csproj --configuration Release --no-restore
