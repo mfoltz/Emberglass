@@ -11,6 +11,7 @@ public sealed class GitHubReleaseClient
     const string GITHUB_API_BASE_URL = "https://api.github.com";
     const string DEFAULT_ACCEPT_HEADER = "application/vnd.github+json";
     const string DEFAULT_USER_AGENT = "Emberglass-GitHubReleaseClient";
+    const string SHA256_DIGEST_PREFIX = "sha256:";
     const int REQUEST_TIMEOUT_SECONDS = 15;
     static readonly HttpClient _httpClient = new();
     static readonly JsonSerializerOptions _serializerOptions = new()
@@ -198,7 +199,43 @@ public sealed class GitHubReleaseClient
             return false;
         }
 
-        digest = digest.Trim();
+        if (!TryNormalizeSha256Digest(digest, out digest, out errorMessage))
+        {
+            return false;
+        }
+
+        errorMessage = string.Empty;
+        return true;
+    }
+
+    /// <summary>
+    /// Normalizes a GitHub Release asset SHA-256 digest to raw hexadecimal form.
+    /// </summary>
+    /// <param name="value">The raw digest metadata value.</param>
+    /// <param name="digest">The normalized raw hexadecimal digest.</param>
+    /// <param name="errorMessage">The error message when normalization fails.</param>
+    /// <returns>True when the digest was normalized.</returns>
+    internal static bool TryNormalizeSha256Digest(string value, out string digest, out string errorMessage)
+    {
+        digest = value.Trim();
+        if (digest.StartsWith(SHA256_DIGEST_PREFIX, StringComparison.OrdinalIgnoreCase))
+        {
+            digest = digest[SHA256_DIGEST_PREFIX.Length..].Trim();
+        }
+        else if (digest.Contains(":", StringComparison.Ordinal))
+        {
+            errorMessage = "GitHub Release asset digest metadata did not use the SHA-256 algorithm.";
+            digest = string.Empty;
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(digest))
+        {
+            errorMessage = "GitHub Release asset metadata did not contain a SHA-256 digest value.";
+            digest = string.Empty;
+            return false;
+        }
+
         errorMessage = string.Empty;
         return true;
     }
