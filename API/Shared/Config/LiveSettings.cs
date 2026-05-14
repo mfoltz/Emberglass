@@ -79,14 +79,17 @@ public sealed class LiveSettings<TSettings>
             throw new ArgumentException("Reason is required.", nameof(reason));
         }
 
+        bool shouldSchedule;
         lock (reasonLock)
         {
             pendingReason = reason;
+            shouldSchedule = reloadRequested == 0;
+            reloadRequested = 1;
         }
 
-        if (Interlocked.Exchange(ref reloadRequested, 1) == 0)
+        if (shouldSchedule)
         {
-            mainThreadInvoker.Run(() => ReloadNow(ConsumePendingReason()));
+            mainThreadInvoker.Run(ProcessPendingReloads);
         }
     }
 
@@ -106,8 +109,6 @@ public sealed class LiveSettings<TSettings>
             throw new ArgumentException("Reason is required.", nameof(reason));
         }
 
-        Interlocked.Exchange(ref reloadRequested, 0);
-
         var previous = Current;
         HashSet<string> changedKeys = new(StringComparer.Ordinal);
         var next = configSpec.BuildSnapshot(previous, previous, changedKeys);
@@ -116,6 +117,35 @@ public sealed class LiveSettings<TSettings>
         Interlocked.Exchange(ref current, next);
 
         Reloaded?.Invoke(this, new ReloadContext<TSettings>(previous, next, reason, nextVersion, changedKeys));
+    }
+
+    void ProcessPendingReloads()
+    {
+        try
+        {
+            while (true)
+            {
+                ReloadNow(ConsumePendingReason());
+
+                lock (reasonLock)
+                {
+                    if (string.IsNullOrWhiteSpace(pendingReason))
+                    {
+                        reloadRequested = 0;
+                        return;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            lock (reasonLock)
+            {
+                reloadRequested = 0;
+            }
+
+            throw;
+        }
     }
 
     string ConsumePendingReason()

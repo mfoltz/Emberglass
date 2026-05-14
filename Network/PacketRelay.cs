@@ -395,12 +395,7 @@ internal static class PacketRelay
         {
             string header = $"{msgGuid}|{i}/{total}|{typeId}|";
             string preHmac = $"{header}{slices[i]}";
-            byte[] tagBytes = ComputeMacServer(user, preHmac);
-
-            if (tagBytes.Length == 0)
-            {
-                return;
-            }
+            byte[] tagBytes = ComputeRequiredMacServer(user, preHmac, typeId);
 
             string tag = Convert.ToHexString(tagBytes);
             _sendServerPacket(user, $"{Const.PREFIX}{preHmac}|{tag}");
@@ -1454,6 +1449,19 @@ internal static class PacketRelay
 
         byte[] hash = hmac.ComputeHash(bytes);
         return hash[..Const.MAC_TAG_BYTES];
+    }
+    static byte[] ComputeRequiredMacServer(User sender, string input, uint typeId)
+    {
+        byte[] tagBytes = ComputeMacServer(sender, input);
+        if (tagBytes.Length == Const.MAC_TAG_BYTES)
+        {
+            return tagBytes;
+        }
+
+        string message = $"[VNetwork] SendPacketFromServer cannot send before the target client session is ready. " +
+            $"Wait for VNetwork.OnReady before sending clientbound packets. platformId={GetPlatformId(sender)} typeId={typeId}.";
+        VWorld.Log?.LogError(message);
+        throw new InvalidOperationException(message);
     }
     /// <summary>
     /// Computes the truncated MAC tag for client-side validation.

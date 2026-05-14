@@ -146,6 +146,27 @@ public sealed class PacketRelayMacTests
     }
 
     /// <summary>
+    /// Ensures server sends fail fast instead of silently dropping packets before a target session is ready.
+    /// </summary>
+    [Fact]
+    public void SendPacketFromServer_ThrowsWhenSessionKeyIsMissing()
+    {
+        Type PacketRelayType = GetPacketRelayType();
+        const ulong PlatformId = 9902;
+        User Sender = new();
+
+        using IDisposable runtimeContextScope = BeginRuntimeContextOverride(isClient: false);
+        using IDisposable platformIdScope = PacketRelay.BeginPlatformIdOverride(user => PlatformId);
+        using PacketRelayHmacScope HmacScope = new(PacketRelayType);
+
+        InvalidOperationException Exception = Assert.Throws<InvalidOperationException>(
+            () => PacketRelay.SendPacketFromServer(Sender, new TestPacket(1)));
+
+        Assert.Contains("SendPacketFromServer cannot send before the target client session is ready", Exception.Message);
+        Assert.Contains($"platformId={PlatformId}", Exception.Message);
+    }
+
+    /// <summary>
     /// Ensures a new client handshake clears stale session keys and readiness.
     /// </summary>
     [Fact]
@@ -359,6 +380,8 @@ public sealed class PacketRelayMacTests
     /// <param name="input">Unsigned payload.</param>
     /// <returns>MAC tag bytes.</returns>
     delegate byte[] ComputeMacClientDelegate(string input);
+
+    readonly record struct TestPacket(int Value);
 
     /// <summary>
     /// Temporarily overrides packet relay HMAC state for testing.
