@@ -152,8 +152,20 @@ internal static class RequestResponse
 
     static readonly ConcurrentDictionary<long, IPendingRequest> _pendingRequests = new();
     static readonly ConcurrentDictionary<Type, Direction> _responseHandlerDirections = new();
+    static Func<User, ulong> _targetIdResolver = target => target.PlatformId;
     static long _nextRequestId;
     static bool _initialized;
+
+    /// <summary>
+    /// Overrides target ID resolution for tests.
+    /// </summary>
+    /// <param name="targetIdResolver">Resolver to use while the override is active.</param>
+    /// <returns>An <see cref="IDisposable"/> that restores the previous resolver.</returns>
+    internal static IDisposable BeginTargetIdOverride(Func<User, ulong> targetIdResolver)
+    {
+        ArgumentNullException.ThrowIfNull(targetIdResolver);
+        return new TargetIdOverrideScope(targetIdResolver);
+    }
 
     /// <summary>
     /// Sends a typed request and awaits the typed response payload, canceling when the target disconnects
@@ -174,12 +186,26 @@ internal static class RequestResponse
 
         if (!_pendingRequests.TryAdd(requestId, pending))
         {
+            pending.TrySetException(new InvalidOperationException($"Failed to track pending request {requestId}."));
             throw new InvalidOperationException($"Failed to track pending request {requestId}.");
         }
 
-        Direction responseDirection = GetResponseDirectionForCurrentSide();
-        EnsureResponseHandlerRegistered<TResponse>(responseDirection);
-        SendRequestEnvelope(target, new RequestEnvelope<TRequest>(requestId, null, request));
+        try
+        {
+            Direction responseDirection = GetResponseDirectionForCurrentSide();
+            EnsureResponseHandlerRegistered<TResponse>(responseDirection);
+            SendRequestEnvelope(target, new RequestEnvelope<TRequest>(requestId, null, request));
+        }
+        catch (Exception ex)
+        {
+            if (_pendingRequests.TryRemove(requestId, out var removedPending))
+            {
+                removedPending.TrySetException(ex);
+            }
+
+            throw;
+        }
+
         return pending.Task;
     }
 
@@ -429,7 +455,21 @@ internal static class RequestResponse
         }
     }
 
-    static ulong GetTargetId(User target) => target.PlatformId;
+    static ulong GetTargetId(User target) => _targetIdResolver(target);
+
+    sealed class TargetIdOverrideScope : IDisposable
+    {
+        readonly Func<User, ulong> originalResolver;
+
+        public TargetIdOverrideScope(Func<User, ulong> targetIdResolver)
+        {
+            originalResolver = _targetIdResolver;
+            _targetIdResolver = targetIdResolver;
+        }
+
+        public void Dispose()
+            => _targetIdResolver = originalResolver;
+    }
 
     static void OnUserDisconnected(UserDisconnected userDisconnected)
     {
