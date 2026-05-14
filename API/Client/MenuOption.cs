@@ -1,4 +1,5 @@
-﻿using Emberglass.API.Shared;
+using Emberglass.API.Shared;
+using Emberglass.Utilities;
 using Stunlock.Localization;
 using System.Text.Json.Serialization;
 using UnityEngine;
@@ -8,9 +9,30 @@ namespace Emberglass.API.Client;
 [Serializable]
 public abstract class MenuOption
 {
+    /// <summary>
+    /// Gets or sets the stable identifier for this option.
+    /// </summary>
+    public string Id { get; set; }
+    /// <summary>
+    /// Gets or sets the display name for this option.
+    /// </summary>
     public string Name { get; set; }
+    /// <summary>
+    /// Gets or sets the display description for this option.
+    /// </summary>
     public string Description { get; set; }
+    /// <summary>
+    /// Gets or sets the category identifier for this option.
+    /// </summary>
     public string Category { get; set; }
+    /// <summary>
+    /// Gets or sets the control scope metadata for the option.
+    /// </summary>
+    public MenuOptionControlScope ControlScope { get; set; }
+    /// <summary>
+    /// Gets or sets a value indicating whether the option requires a reload to apply.
+    /// </summary>
+    public bool RequiresReload { get; set; }
 
     [JsonIgnore]
     public LocalizationKey NameKey;
@@ -18,13 +40,39 @@ public abstract class MenuOption
     [JsonIgnore]
     public LocalizationKey DescKey;
     protected MenuOption() { }
-    protected MenuOption(string name, string description, string category)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MenuOption"/> class.
+    /// </summary>
+    /// <param name="id">The stable identifier for the option.</param>
+    /// <param name="name">The display name for the option.</param>
+    /// <param name="description">The display description for the option.</param>
+    /// <param name="category">The category identifier for the option.</param>
+    protected MenuOption(string id, string name, string description, string category)
     {
+        Id = id;
         Name = name;
         Description = description;
         NameKey = LocalizationKeyManager.GetLocalizationKey(name);
         DescKey = LocalizationKeyManager.GetLocalizationKey(description);
         Category = category;
+    }
+    /// <summary>
+    /// Gets the description localization key with any status labels appended.
+    /// </summary>
+    /// <returns>The localization key for the combined description text.</returns>
+    public LocalizationKey GetDisplayDescriptionKey()
+    {
+        string labelText = MenuOptionLabelBuilder.BuildLabelText(ControlScope, RequiresReload);
+        if (string.IsNullOrWhiteSpace(labelText))
+        {
+            return DescKey;
+        }
+
+        string combinedText = string.IsNullOrWhiteSpace(Description)
+            ? labelText
+            : $"{Description}\n{labelText}";
+
+        return LocalizationKeyManager.GetLocalizationKey(combinedText);
     }
     public abstract void ApplyDefault();
     public abstract void ApplySaved(MenuOption other);
@@ -33,14 +81,21 @@ public abstract class MenuOption
 [Serializable]
 public abstract class MenuOption<T> : MenuOption
 {
-    public delegate void OptionChangedHandler<TValue>(TValue newValue);
+    public delegate void ConfigChangeHandler<TValue>(TValue newValue);
+    public event ConfigChangeHandler<T> OnConfigChange = delegate { };
     public virtual T Value { get; set; }
     public T DefaultValue { get; set; }
-
-    public event OptionChangedHandler<T> OnOptionChangedHandler = delegate { };
-    protected MenuOption() : base() { }
-    protected MenuOption(string name, string description, string category, T defaultValue)
-        : base(name, description, category)
+    protected MenuOption() { }
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MenuOption{T}"/> class.
+    /// </summary>
+    /// <param name="id">The stable identifier for the option.</param>
+    /// <param name="name">The display name for the option.</param>
+    /// <param name="description">The display description for the option.</param>
+    /// <param name="category">The category identifier for the option.</param>
+    /// <param name="defaultValue">The default value for the option.</param>
+    protected MenuOption(string id, string name, string description, string category, T defaultValue)
+        : base(id, name, description, category)
     {
         Value = defaultValue;
         DefaultValue = defaultValue;
@@ -48,9 +103,20 @@ public abstract class MenuOption<T> : MenuOption
     public virtual void SetValue(T value)
     {
         Value = value;
-        OnOptionChangedHandler(value);
+        OnConfigChange(value);
     }
-    public void AddListener(OptionChangedHandler<T> listener) => OnOptionChangedHandler += listener;
+
+    public Action<T> OnValueChange() // previous actions were static
+    {
+        return value =>
+        {
+            SetValue(value);
+            Persistence.SaveOptions();
+        };
+    }
+
+    public void AddListener(ConfigChangeHandler<T> listener)
+         => OnConfigChange += listener;
     public override void ApplyDefault() => SetValue(DefaultValue);
     public override void ApplySaved(MenuOption other)
     {
@@ -61,7 +127,7 @@ public abstract class MenuOption<T> : MenuOption
         }
         else
         {
-            VWorld.Log.LogWarning($"[MenuOption] Type mismatch loading values - {other.Name}");
+            VWorld.Log.LogWarning($"[MenuOption] Type mismatch loading saved values - {other.Name}");
         }
     }
 }
@@ -69,9 +135,17 @@ public abstract class MenuOption<T> : MenuOption
 [Serializable]
 public class Toggle : MenuOption<bool>
 {
-    public Toggle() : base() { }
-    public Toggle(string name, string description, string category, bool defaultValue)
-        : base(name, description, category, defaultValue) { }
+    public Toggle() { }
+    /// <summary>
+    /// Initializes a new instance of the <see cref="Toggle"/> class.
+    /// </summary>
+    /// <param name="id">The stable identifier for the option.</param>
+    /// <param name="name">The display name for the option.</param>
+    /// <param name="description">The display description for the option.</param>
+    /// <param name="category">The category identifier for the option.</param>
+    /// <param name="defaultValue">The default value for the option.</param>
+    public Toggle(string id, string name, string description, string category, bool defaultValue)
+        : base(id, name, description, category, defaultValue) { }
     public override void ApplySaved(MenuOption other)
     {
         if (other is Toggle toggle)
@@ -79,7 +153,8 @@ public class Toggle : MenuOption<bool>
             SetValue(toggle.Value);
         }
     }
-    public override void ApplyDefault() => SetValue(DefaultValue);
+    public override void ApplyDefault()
+        => SetValue(DefaultValue);
 }
 
 [Serializable]
@@ -98,9 +173,21 @@ public class Slider : MenuOption<float>
         get => Mathf.Clamp(base.Value, MinValue, MaxValue);
         set => base.Value = Mathf.Clamp(value, MinValue, MaxValue);
     }
-    public Slider() : base() { }
-    public Slider(string name, string description, string category, float min, float max, float defaultValue, int decimals = default, float step = default)
-        : base(name, description, category, Mathf.Clamp(defaultValue, min, max))
+    public Slider() { }
+    /// <summary>
+    /// Initializes a new instance of the <see cref="Slider"/> class.
+    /// </summary>
+    /// <param name="id">The stable identifier for the option.</param>
+    /// <param name="name">The display name for the option.</param>
+    /// <param name="description">The display description for the option.</param>
+    /// <param name="category">The category identifier for the option.</param>
+    /// <param name="min">The minimum value for the slider.</param>
+    /// <param name="max">The maximum value for the slider.</param>
+    /// <param name="defaultValue">The default value for the slider.</param>
+    /// <param name="decimals">The number of decimal places to display.</param>
+    /// <param name="step">The slider step value.</param>
+    public Slider(string id, string name, string description, string category, float min, float max, float defaultValue, int decimals = default, float step = default)
+        : base(id, name, description, category, Mathf.Clamp(defaultValue, min, max))
     {
         MinValue = min;
         MaxValue = max;
@@ -129,9 +216,18 @@ public class Slider : MenuOption<float>
 public class Dropdown : MenuOption<int>
 {
     public List<string> Values { get; set; } = [];
-    public Dropdown() : base() { }
-    public Dropdown(string name, string description, string category, int defaultIndex, string[] values)
-        : base(name, description, category, defaultIndex)
+    public Dropdown() { }
+    /// <summary>
+    /// Initializes a new instance of the <see cref="Dropdown"/> class.
+    /// </summary>
+    /// <param name="id">The stable identifier for the option.</param>
+    /// <param name="name">The display name for the option.</param>
+    /// <param name="description">The display description for the option.</param>
+    /// <param name="category">The category identifier for the option.</param>
+    /// <param name="defaultIndex">The default selected index.</param>
+    /// <param name="values">The dropdown values.</param>
+    public Dropdown(string id, string name, string description, string category, int defaultIndex, string[] values)
+        : base(id, name, description, category, defaultIndex)
     {
         Values = values?.ToList() ?? [];
     }

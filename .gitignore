@@ -296,3 +296,5 @@ dist/
 /*.sln
 *.env
 Patches/Shared/WIP.cs
+Patches/Shared/CastleRebuildTesting.cs
+.prd/receipts/

@@ -1,4 +1,4 @@
-﻿using Emberglass.API.Shared;
+using Emberglass.API.Shared;
 using HarmonyLib;
 using ProjectM;
 using ProjectM.Network;
@@ -47,6 +47,7 @@ internal class ChatMessageSystemPatch
             try
             {
                 OnChatMessageHandler?.Invoke(entity, chatMessage, fromCharacter);
+                entity.Destroy(true);
             }
             catch (Exception ex)
             {

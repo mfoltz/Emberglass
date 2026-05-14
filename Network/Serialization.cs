@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -7,7 +7,23 @@ using System.Text.Json;
 namespace Emberglass.Network;
 internal static class Serialization
 {
+    /// <summary>
+    /// Packs a value into a byte array for network transmission.
+    /// </summary>
+    /// <param name="obj">The value to pack.</param>
+    /// <returns>The serialized bytes for the provided value.</returns>
+    /// <remarks>
+    /// For blittable types, the packed byte array length is <c>Marshal.SizeOf(type)</c>.
+    /// </remarks>
     public delegate byte[] PackDelHandler(object obj);
+    /// <summary>
+    /// Unpacks a value from a byte span.
+    /// </summary>
+    /// <param name="data">The raw byte span containing the packed value.</param>
+    /// <returns>The deserialized value represented by the provided bytes.</returns>
+    /// <remarks>
+    /// For blittable types, the byte span length must equal <c>Marshal.SizeOf(type)</c>.
+    /// </remarks>
     public delegate object UnpackDelHandler(ReadOnlySpan<byte> data);
 
     static readonly JsonSerializerOptions _jsonOptions = new()
@@ -52,6 +68,13 @@ internal static class Serialization
 
             return dataSpan =>
             {
+                if (dataSpan.Length != size)
+                {
+                    throw new ArgumentException(
+                        $"Expected {size} bytes for {type.Name}, but received {dataSpan.Length}.",
+                        nameof(dataSpan));
+                }
+
                 byte[] buffer = dataSpan.ToArray();
                 IntPtr ptr = Marshal.AllocHGlobal(size);
 

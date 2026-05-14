@@ -1,8 +1,10 @@
 using Emberglass.API.Client;
+using Emberglass.API.Server;
 using Emberglass.API.Shared;
+using Emberglass.Network;
 using Emberglass.Patches.Client;
 using Emberglass.Patches.Server;
-using Emberglass.Services;
+using Emberglass.Systems;
 using HarmonyLib;
 using ProjectM;
 
@@ -17,9 +19,11 @@ internal static class GameBootstrapPatch
         {
             WorldBootstrapPatches.Initialize();
             VBehaviour.Initialize();
+            VBehaviour.MainThreadInvoker = new MainThreadInvoker();
 
             if (VWorld.IsServer)
             {
+                ObserverSystemRegistry.RegisterAll();
                 ChatMessageSystemPatch.Initialize();
                 VShare.Initialize();
             }
@@ -29,6 +33,21 @@ internal static class GameBootstrapPatch
                 ClientChatSystemPatch.Initialize();
                 InputActionSystemPatch.Initialize();
                 OptionsMenuPatches.Initialize();
+                OptionsManager.AddButton(
+                    "emberglass.request_shared_mods",
+                    "Request Shared Mods",
+                    "Request server-shared mods for this client (requires your consent).",
+                    MyPluginInfo.PLUGIN_NAME,
+                    () =>
+                    {
+                        if (!VWorld.IsClient)
+                        {
+                            VWorld.Log.LogWarning("Shared mod requests can only be initiated by clients.");
+                            return;
+                        }
+
+                        Transference.RequestSharedModsFromMenu();
+                    });
             }
         }
         catch (Exception ex)
@@ -59,6 +78,13 @@ internal static class GameBootstrapPatch
             OptionsMenuPatches.Uninitialize();
         }
 
+        RequestResponse.Uninitialize();
+
+        if (VWorld.IsServer)
+        {
+            PlayerPresenceValidationProbe.Uninitialize();
+        }
+
         VEvents.ModuleRegistry.Uninitialize();
     }
 
@@ -72,11 +98,12 @@ internal static class GameBootstrapPatch
         }
 
         VEvents.Initialize();
-        VNetwork.Initialize();
+        API.Shared.VNetwork.Initialize();
 
         if (VWorld.IsServer)
         {
-            PlayerService.Initialize();
+            Players.Initialize();
+            PlayerPresenceValidationProbe.Initialize();
         }
 
         if (VWorld.IsClient)

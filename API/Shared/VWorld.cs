@@ -1,11 +1,10 @@
 using BepInEx.Logging;
-using Emberglass;
 using ProjectM;
 using ProjectM.Network;
 using ProjectM.Scripting;
+using System.Diagnostics;
 using Unity.Collections;
 using Unity.Entities;
-using UnityEngine;
 
 namespace Emberglass.API.Shared;
 
@@ -14,10 +13,17 @@ namespace Emberglass.API.Shared;
 /// </summary>
 public static class VWorld
 {
+    enum RuntimeContext
+    {
+        Client,
+        Server
+    }
+
     public static EntityManager EntityManager => World.EntityManager;
 
     static World _clientWorld;
     static World _serverWorld;
+    static RuntimeContext? _runtimeContextOverride;
 
     static ScriptMapper _scriptMapper;
     static GameManager _gameManager;
@@ -26,6 +32,9 @@ public static class VWorld
     /// <summary>
     /// Return the Unity ECS World instance used on the server build of VRising.
     /// </summary>
+    /// <remarks>
+    /// This property is server-only and throws if accessed on the client.
+    /// </remarks>
     public static World Server
     {
         get
@@ -35,7 +44,7 @@ public static class VWorld
                 return _serverWorld;
             }
 
-            _serverWorld = GetWorld("Server")
+            _serverWorld = WorldUtility.FindServerWorld()
                 ?? throw new Exception("There is no Server world (yet). Did you install a server mod on the client?");
             return _serverWorld;
         }
@@ -44,6 +53,9 @@ public static class VWorld
     /// <summary>
     /// Return the Unity ECS World instance used on the client build of VRising.
     /// </summary>
+    /// <remarks>
+    /// This property is client-only and throws if accessed on the server.
+    /// </remarks>
     public static World Client
     {
         get
@@ -53,7 +65,7 @@ public static class VWorld
                 return _clientWorld;
             }
 
-            _clientWorld = GetWorld("Client_0")
+            _clientWorld = WorldUtility.FindClientWorld()
                 ?? throw new Exception("There is no Client world (yet). Did you install a client mod on the server?");
             return _clientWorld;
         }
@@ -115,44 +127,72 @@ public static class VWorld
     /// <summary>
     /// Local character and user entities when running on the client build of VRising.
     /// </summary>
-    public static Entity LocalCharacter =>
-        IsClient && _localCharacter.Exists()
-            ? _localCharacter
-            : ConsoleShared.TryGetLocalCharacterInCurrentWorld(out _localCharacter, World) && _localCharacter.Exists()
+    /// <remarks>
+    /// This property is client-only and throws if accessed on the server.
+    /// </remarks>
+    public static Entity LocalCharacter
+    {
+        get
+        {
+            if (_localCharacter.Exists())
+            {
+                return _localCharacter;
+            }
+
+            return ConsoleShared.TryGetLocalCharacterInCurrentWorld(out _localCharacter, World) && _localCharacter.Exists()
                 ? _localCharacter
                 : Entity.Null;
-    public static Entity LocalUser =>
-        IsClient && _localUser.Exists()
-            ? _localUser
-            : ConsoleShared.TryGetLocalUserInCurrentWorld(out _localUser, World) && _localUser.Exists()
+        }
+    }
+
+    /// <summary>
+    /// Local user entity when running on the client build of VRising.
+    /// </summary>
+    /// <remarks>
+    /// This property is client-only and throws if accessed on the server.
+    /// </remarks>
+    public static Entity LocalUser
+    {
+        get
+        {
+            if (_localUser.Exists())
+            {
+                return _localUser;
+            }
+
+            return ConsoleShared.TryGetLocalUserInCurrentWorld(out _localUser, World) && _localUser.Exists()
                 ? _localUser
                 : Entity.Null;
+        }
+    }
 
     static Entity _localCharacter;
     static Entity _localUser;
     public static World Default => World.DefaultGameObjectInjectionWorld;
     public static World World => IsClient ? Client : Server;
-    public static bool IsServer => Application.productName == "VRisingServer";
-    public static bool IsClient => Application.productName == "VRising";
-    public static ManualLogSource Log => Plugin.Logger;
-    static World GetWorld(string name)
-    {
-        foreach (var world in World.s_AllWorlds)
-        {
-            if (world.Name == name)
-            {
-                _serverWorld = world;
-                return world;
-            }
-        }
+    public static bool IsServer
+        => TryGetRuntimeContext(out RuntimeContext context)
+            && context == RuntimeContext.Server;
+    public static bool IsClient
+        => TryGetRuntimeContext(out RuntimeContext context)
+            && context == RuntimeContext.Client;
+    public static ManualLogSource Log
+        => Plugin.Logger;
 
-        return null;
+    /// <summary>
+    /// Temporarily overrides client/server context detection for testing scenarios.
+    /// </summary>
+    /// <param name="isClient">True to force client context; false to force server context.</param>
+    /// <returns>An <see cref="IDisposable"/> that restores the previous runtime context.</returns>
+    internal static IDisposable BeginRuntimeContextOverride(bool isClient)
+    {
+        return new RuntimeContextOverrideScope(isClient ? RuntimeContext.Client : RuntimeContext.Server);
     }
+
     public static T GetSystem<T>() where T : ComponentSystemBase
     {
         return World.GetExistingSystemManaged<T>();
     }
-
     public static T GetSingleton<T>() => ScriptMapper.GetSingleton<T>();
     public static Entity GetSingletonEntity<T>() => ScriptMapper.GetSingletonEntity<T>();
     public static Entity GetSingletonEntityFromAccessor<T>()
@@ -160,6 +200,111 @@ public static class VWorld
         return SingletonAccessor<T>.TryGetSingletonEntityWasteful(EntityManager, out Entity singletonEntity)
             ? singletonEntity
             : Entity.Null;
+    }
+
+    static bool TryGetRuntimeContext(out RuntimeContext context)
+    {
+        try
+        {
+            if (_runtimeContextOverride.HasValue)
+            {
+                context = _runtimeContextOverride.Value;
+                return true;
+            }
+
+            if (TryGetRuntimeContextFromWorld(Default, out context))
+            {
+                return true;
+            }
+
+            if (TryGetRuntimeContextFromWorld(_clientWorld, out context)
+                || TryGetRuntimeContextFromWorld(_serverWorld, out context))
+            {
+                return true;
+            }
+
+            World clientWorld = WorldUtility.FindClientWorld();
+            if (TryGetRuntimeContextFromWorld(clientWorld, out context))
+            {
+                _clientWorld = clientWorld;
+                return true;
+            }
+
+            World serverWorld = WorldUtility.FindServerWorld();
+            if (TryGetRuntimeContextFromWorld(serverWorld, out context))
+            {
+                _serverWorld = serverWorld;
+                return true;
+            }
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or MissingMethodException or TypeLoadException)
+        {
+            context = default;
+            return false;
+        }
+
+        string processName = Process.GetCurrentProcess().ProcessName;
+        if (processName.Contains("VRisingServer", StringComparison.OrdinalIgnoreCase))
+        {
+            context = RuntimeContext.Server;
+            return true;
+        }
+
+        if (processName.Contains("VRising", StringComparison.OrdinalIgnoreCase))
+        {
+            context = RuntimeContext.Client;
+            return true;
+        }
+
+        context = default;
+        return false;
+    }
+
+    static bool TryGetRuntimeContextFromWorld(World world, out RuntimeContext context)
+    {
+        if (world?.IsCreated != true)
+        {
+            context = default;
+            return false;
+        }
+
+        if (world.IsClientWorld())
+        {
+            context = RuntimeContext.Client;
+            return true;
+        }
+
+        if (world.IsServerWorld())
+        {
+            context = RuntimeContext.Server;
+            return true;
+        }
+
+        context = default;
+        return false;
+    }
+
+    sealed class RuntimeContextOverrideScope : IDisposable
+    {
+        readonly RuntimeContext? _originalContext;
+
+        /// <summary>
+        /// Initializes a new runtime context override scope.
+        /// </summary>
+        /// <param name="runtimeContext">Context to force while the scope is active.</param>
+        internal RuntimeContextOverrideScope(RuntimeContext runtimeContext)
+        {
+            _originalContext = _runtimeContextOverride;
+            _runtimeContextOverride = runtimeContext;
+        }
+
+        /// <summary>
+        /// Restores the original runtime context override.
+        /// </summary>
+        public void Dispose()
+        {
+            _runtimeContextOverride = _originalContext;
+        }
     }
 }
 public sealed class GameManager
@@ -209,7 +354,6 @@ public sealed class ScriptMapper
             _serverScriptMapper = serverScriptMapper;
         }
     }
-
     public T GetSingleton<T>() => _impl.GetSingleton<T>();
     public Entity GetSingletonEntity<T>() => _impl.GetSingletonEntity<T>();
 }
@@ -221,7 +365,10 @@ public struct NativeAccessor<T>(NativeArray<T> array) : IDisposable where T : un
         get => _array[index];
         set => _array[index] = value;
     }
-    public int Length => _array.Length;
-    public NativeArray<T>.Enumerator GetEnumerator() => _array.GetEnumerator();
-    public void Dispose() => _array.Dispose();
+    public int Length
+        => _array.Length;
+    public NativeArray<T>.Enumerator GetEnumerator()
+        => _array.GetEnumerator();
+    public void Dispose()
+        => _array.Dispose();
 }

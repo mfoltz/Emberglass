@@ -13,7 +13,7 @@ public static class ClientModules
     [
         typeof(ConnectionModules.ClientHandshakeModule)
     ];
-    internal static void Initialize()
+    internal static void Bootstrap()
     {
         try
         {
@@ -24,7 +24,7 @@ public static class ClientModules
         }
         catch (Exception ex)
         {
-            VWorld.Log.LogError($"Failed to initialize client event modules: {ex}");
+            VWorld.Log.LogError($"Failed to bootstrap client event modules: {ex}");
         }
     }
     public static class ConnectionModules
@@ -35,7 +35,7 @@ public static class ClientModules
             static ClientHandshakeModule _instance;
             static Harmony _harmony;
             static bool _ready;
-            static PrefabGUID TombCoffinSpawn { get; } = new(722466953); // AB_Interact_TombCoffinSpawn_Travel; one-off is okay but if we need more PrefabGUIDs elsewhere should embed as file w/ fields
+            static PrefabGUID TombCoffinSpawn { get; } = new(722466953);
             public override void Initialize()
             {
                 _harmony = Harmony.CreateAndPatchAll(typeof(Patch), MyPluginInfo.PLUGIN_GUID);

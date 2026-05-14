@@ -1,4 +1,4 @@
-﻿using Emberglass.API.Shared;
+using Emberglass.API.Shared;
 using ProjectM.Scripting;
 using System.Reflection;
 using Unity.Entities;
@@ -76,7 +76,22 @@ internal static class Hotloader
 
     public static void ReflectAndInitialize(Assembly modAssembly)
     {
-        foreach (var type in modAssembly.GetTypes())
+        IEnumerable<Type> types;
+        try
+        {
+            types = modAssembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            foreach (var loaderException in ex.LoaderExceptions.Where(exception => exception != null))
+            {
+                VWorld.Log.LogWarning($"[Hotload] Type load warning: {loaderException}");
+            }
+
+            types = ex.Types.Where(type => type != null).Select(type => type!);
+        }
+
+        foreach (var type in types)
         {
             var init = type.GetMethod("Initialize", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
             if (init == null)
@@ -84,7 +99,15 @@ internal static class Hotloader
                 continue;
             }
 
-            var args = init.GetParameters().Select(p => ResolveParam(p.ParameterType)).ToArray();
+            var parameters = init.GetParameters();
+            var args = parameters.Select(p => ResolveParam(p.ParameterType)).ToArray();
+            if (args.Any(arg => arg == null))
+            {
+                var parameterList = string.Join(", ", parameters.Select(param => param.ParameterType.Name));
+                VWorld.Log.LogWarning(
+                    $"[Hotload] Skipping {type.FullName}.Initialize due to unresolved parameters ({parameterList}).");
+                continue;
+            }
 
             try
             {

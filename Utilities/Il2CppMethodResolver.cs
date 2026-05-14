@@ -23,13 +23,12 @@ public static class Il2CppMethodResolver
             _ => instruction.NearBranchTarget,
         };
     }
-
     static unsafe IntPtr ResolveMethodPointer(IntPtr methodPointer)
     {
-        var stream = new UnmanagedMemoryStream((byte*)methodPointer, 256, 256, FileAccess.Read);
-        var codeReader = new StreamCodeReader(stream);
+        UnmanagedMemoryStream stream = new((byte*)methodPointer, 256, 256, FileAccess.Read);
+        StreamCodeReader codeReader = new(stream);
 
-        var decoder = Decoder.Create(IntPtr.Size == 8 ? 64 : 32, codeReader);
+        Decoder decoder = Decoder.Create(IntPtr.Size == 8 ? 64 : 32, codeReader);
         decoder.IP = (ulong)methodPointer.ToInt64();
 
         Instruction instr = default;
@@ -58,12 +57,10 @@ public static class Il2CppMethodResolver
 
         return methodPointer;
     }
-
     public static unsafe IntPtr ResolveFromMethodInfo(INativeMethodInfoStruct methodInfo)
     {
         return ResolveMethodPointer(methodInfo.MethodPointer);
     }
-
     public static unsafe IntPtr ResolveFromMethodInfo(MethodInfo method)
     {
         var methodInfoField = Il2CppInteropUtils.GetIl2CppMethodInfoPointerFieldForGeneratedMethod(method)

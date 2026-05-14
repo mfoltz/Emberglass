@@ -1,15 +1,20 @@
-﻿using Emberglass.API.Shared;
-using ProjectM;
+using Emberglass.API.Shared;
 using System;
 using System.Collections;
 using Unity.Entities;
 using UnityEngine;
 
 namespace Emberglass.Network.Examples;
+/// <summary>
+/// Represents a ping request containing client ticks.
+/// </summary>
 internal readonly struct Ping(long ticks)
 {
     public readonly long ClientTicks = ticks;
 }
+/// <summary>
+/// Represents a pong response containing client and server ticks.
+/// </summary>
 internal readonly struct Pong(long cTicks, long sTicks)
 {
     public readonly long ClientTicks = cTicks;
@@ -17,6 +22,9 @@ internal readonly struct Pong(long cTicks, long sTicks)
 }
 internal static class NetworkTesting
 {
+    /// <summary>
+    /// Demonstrates request/response messaging with a ping/pong exchange.
+    /// </summary>
     public static void PingPong()
     {
         if (VWorld.IsClient)
@@ -25,18 +33,18 @@ internal static class NetworkTesting
         }
         else if (VWorld.IsServer)
         {
-            VWorld.Log.LogWarning("[PingPong.Server] Registering -> SendToClient(Pong)");
-            VNetwork.RegisterServerbound<Ping>((sender, ping) =>
-            {
-                VWorld.Log.LogWarning($"[ClientPacketReceived] Received ping from {sender.PlatformId}");
-                VNetwork.SendToClient(sender, new Pong(ping.ClientTicks, DateTime.UtcNow.Ticks));
-            });
+            RegisterPingHandler();
         }
     }
 
     const float DELAY = 60f;
+    const int REQUEST_TIMEOUT_SECONDS = 10;
     static readonly WaitForSeconds _delay = new(DELAY);
     public static bool _ready = false;
+    /// <summary>
+    /// Waits for readiness before sending the first ping request.
+    /// </summary>
+    /// <returns>An enumerator for the coroutine.</returns>
     static IEnumerator DelayedPing()
     {
         while (!_ready)
@@ -44,18 +52,44 @@ internal static class NetworkTesting
             yield return null;
         }
 
-        // Subscribing to character creation here would have been more sensical but made that module after, this should be enough to get the idea across at least.
+        yield return _delay;
+        SendPingOnceAsync();
+    }
 
-        VNetwork.RegisterClientbound<Pong>((sender, pong) =>
+    /// <summary>
+    /// Registers a request handler that responds to pings with pong payloads.
+    /// </summary>
+    static void RegisterPingHandler()
+    {
+        VWorld.Log.LogWarning("[PingPong.Server] Registering -> RequestResponse(Ping/Pong)");
+        API.Shared.VNetwork.RegisterRequestHandler<Ping, Pong>((sender, ping) =>
         {
+            VWorld.Log.LogWarning($"[ClientPacketReceived] Received ping from {sender.PlatformId}");
+            return new Pong(ping.ClientTicks, DateTime.UtcNow.Ticks);
+        });
+    }
+
+    /// <summary>
+    /// Sends a single ping request and logs the round trip time.
+    /// </summary>
+    static async void SendPingOnceAsync()
+    {
+        long startTicks = DateTime.UtcNow.Ticks;
+        try
+        {
+            Pong pong = await API.Shared.VNetwork.SendRequestAsync<Ping, Pong>(
+                VWorld.LocalUser.GetUser(),
+                new Ping(startTicks),
+                TimeSpan.FromSeconds(REQUEST_TIMEOUT_SECONDS));
+
             long rttTicks = DateTime.UtcNow.Ticks - pong.ClientTicks;
             double ms = TimeSpan.FromTicks(rttTicks).TotalMilliseconds;
-            VWorld.Log.LogWarning($"[ServerPacketReceived] RTT ≈ {ms:F1} ms (server responded in "
-                         + $"{TimeSpan.FromTicks(pong.ServerTicks - pong.ClientTicks).TotalMilliseconds:F1} ms)");
-            VNetwork.SendToServer(new Ping(DateTime.UtcNow.Ticks));
-        });
-
-        VNetwork.SendToServer(new Ping(DateTime.UtcNow.Ticks));
+            double serverMs = TimeSpan.FromTicks(pong.ServerTicks - pong.ClientTicks).TotalMilliseconds;
+            VWorld.Log.LogWarning($"[ServerPacketReceived] RTT ≈ {ms:F1} ms (server responded in {serverMs:F1} ms)");
+        }
+        catch (TimeoutException)
+        {
+            VWorld.Log.LogWarning("[PingPong.Client] Ping request timed out.");
+        }
     }
 }
-

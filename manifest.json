@@ -1,0 +1,9 @@
+{
+  "name": "Emberglass",
+  "version_number": "0.1.0",
+  "website_url": "https://github.com/mfoltz/Emberglass",
+  "description": "Networking beta for V Rising modders: typed VNetwork client/server packets with trust-pinned authenticated handshakes.",
+  "dependencies": [
+    "BepInEx-BepInExPack_V_Rising-1.733.2"
+  ]
+}
