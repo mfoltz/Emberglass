@@ -295,7 +295,7 @@ internal static class Transference
     static readonly Dictionary<Guid, PendingClientOffer> pendingClientOffers = [];
     static readonly Dictionary<Guid, PendingServerOffer> pendingServerOffers = [];
     static readonly object pendingOfferLock = new();
-    static readonly Dictionary<string, DateTime> overwriteConfirmations = new(StringComparer.OrdinalIgnoreCase);
+    static readonly Dictionary<OverwriteConfirmationKey, DateTime> overwriteConfirmations = [];
     static readonly object overwriteConfirmationLock = new();
     static bool offerCleanupStarted;
     static bool incomingCleanupStarted;
@@ -465,7 +465,7 @@ internal static class Transference
 
         if (allowOverwrite)
         {
-            RegisterOverwriteConfirmation(offer.FileNameString);
+            RegisterOverwriteConfirmation(offer.Id, offer.FileNameString);
             VWorld.Log.LogWarning(
                 $"Overwrite confirmation recorded for {offer.FileNameString} (offer {offer.Id}).");
         }
@@ -502,7 +502,12 @@ internal static class Transference
 
     public static void InternalTransferRequest(User user, TransferRequest request)
     {
-        TransferRoutine(user, request.FileNameString, request.Clientbound, request.Hotload).Run();
+        InternalTransferRequest(user, request, null);
+    }
+
+    static void InternalTransferRequest(User user, TransferRequest request, Guid? transferId)
+    {
+        TransferRoutine(user, request.FileNameString, request.Clientbound, request.Hotload, transferId).Run();
     }
 
     /// <summary>
@@ -561,7 +566,7 @@ internal static class Transference
             SendTransferOffer(user, new TransferRequest(entry.FileName.AsSpan(), clientbound: true, hotload: false));
         }
     }
-    static IEnumerator TransferRoutine(User target, string fileName, bool clientbound, bool hotload = false)
+    static IEnumerator TransferRoutine(User target, string fileName, bool clientbound, bool hotload = false, Guid? transferId = null)
     {
         bool isZip = fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
         string pluginName = Path.GetFileNameWithoutExtension(fileName);
@@ -721,7 +726,7 @@ internal static class Transference
             }
         }
 
-        Guid id = Guid.NewGuid();
+        Guid id = transferId ?? Guid.NewGuid();
         byte[] Hash = null;
         bool HashComplete = false;
         QueueTransferHashWork(
@@ -855,7 +860,7 @@ internal static class Transference
 
         VWorld.Log.LogWarning(
             $"Transfer accepted ~ ID: {accept.Id} | Plugin: {pendingOffer.Offer.FileNameString} | Target: {user.PlatformId}");
-        InternalTransferRequest(user, pendingOffer.Request);
+        InternalTransferRequest(user, pendingOffer.Request, pendingOffer.Offer.Id);
     }
     /// <summary>
     /// Handles a client decline by clearing the pending offer on the server.
@@ -985,7 +990,7 @@ internal static class Transference
         bool isZip = incoming.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
         string filePath = isZip ? string.Empty : Path.Combine(Paths.PluginPath, incoming.FileName);
         string tempFilePath = BuildIncomingTempFilePath(incoming.FileName, incoming.Id);
-        bool allowOverwrite = TryConsumeOverwriteConfirmation(incoming.FileName);
+        bool allowOverwrite = TryConsumeOverwriteConfirmation(incoming.Id, incoming.FileName);
 
         if (!isZip && !TryHandleExistingDll(filePath, incoming, allowOverwrite))
         {
@@ -2519,50 +2524,55 @@ internal static class Transference
     }
 
     /// <summary>
-    /// Records overwrite confirmation for a specific transfer file name.
+    /// Records overwrite confirmation for a specific transfer offer and file name.
     /// </summary>
+    /// <param name="transferId">The accepted offer or transfer identifier.</param>
     /// <param name="fileName">The file name approved for overwrite.</param>
-    static void RegisterOverwriteConfirmation(string fileName)
+    static void RegisterOverwriteConfirmation(Guid transferId, string fileName)
     {
-        if (string.IsNullOrWhiteSpace(fileName))
+        if (transferId == Guid.Empty || string.IsNullOrWhiteSpace(fileName))
         {
             return;
         }
 
         DateTime expiresAt = GetUtcNow().Add(offerTimeout);
+        var key = new OverwriteConfirmationKey(transferId, fileName);
 
         lock (overwriteConfirmationLock)
         {
-            overwriteConfirmations[fileName] = expiresAt;
+            overwriteConfirmations[key] = expiresAt;
         }
     }
 
     /// <summary>
-    /// Consumes overwrite confirmation for a specific file name if present.
+    /// Consumes overwrite confirmation for a specific transfer and file name if present.
     /// </summary>
+    /// <param name="transferId">The accepted offer or transfer identifier.</param>
     /// <param name="fileName">The file name to check for confirmation.</param>
     /// <returns><c>true</c> if confirmation was present and consumed; otherwise, <c>false</c>.</returns>
-    static bool TryConsumeOverwriteConfirmation(string fileName)
+    static bool TryConsumeOverwriteConfirmation(Guid transferId, string fileName)
     {
-        if (string.IsNullOrWhiteSpace(fileName))
+        if (transferId == Guid.Empty || string.IsNullOrWhiteSpace(fileName))
         {
             return false;
         }
 
+        var key = new OverwriteConfirmationKey(transferId, fileName);
+
         lock (overwriteConfirmationLock)
         {
-            if (!overwriteConfirmations.TryGetValue(fileName, out DateTime expiresAt))
+            if (!overwriteConfirmations.TryGetValue(key, out DateTime expiresAt))
             {
                 return false;
             }
 
             if (expiresAt <= GetUtcNow())
             {
-                overwriteConfirmations.Remove(fileName);
+                overwriteConfirmations.Remove(key);
                 return false;
             }
 
-            overwriteConfirmations.Remove(fileName);
+            overwriteConfirmations.Remove(key);
             return true;
         }
     }
@@ -2573,7 +2583,7 @@ internal static class Transference
     /// <param name="now">The current UTC timestamp.</param>
     static void CleanupExpiredOverwriteConfirmations(DateTime now)
     {
-        List<string> expiredEntries = null;
+        List<OverwriteConfirmationKey> expiredEntries = null;
 
         lock (overwriteConfirmationLock)
         {
@@ -2588,12 +2598,66 @@ internal static class Transference
 
             if (expiredEntries != null)
             {
-                foreach (string fileName in expiredEntries)
+                foreach (OverwriteConfirmationKey key in expiredEntries)
                 {
-                    overwriteConfirmations.Remove(fileName);
+                    overwriteConfirmations.Remove(key);
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Records overwrite confirmation for testing.
+    /// </summary>
+    /// <param name="transferId">The accepted offer or transfer identifier.</param>
+    /// <param name="fileName">The file name approved for overwrite.</param>
+    internal static void RegisterOverwriteConfirmationForTesting(Guid transferId, string fileName)
+    {
+        RegisterOverwriteConfirmation(transferId, fileName);
+    }
+
+    /// <summary>
+    /// Consumes overwrite confirmation for testing.
+    /// </summary>
+    /// <param name="transferId">The accepted offer or transfer identifier.</param>
+    /// <param name="fileName">The file name to check for confirmation.</param>
+    /// <returns><c>true</c> if confirmation was present and consumed; otherwise, <c>false</c>.</returns>
+    internal static bool TryConsumeOverwriteConfirmationForTesting(Guid transferId, string fileName)
+    {
+        return TryConsumeOverwriteConfirmation(transferId, fileName);
+    }
+
+    /// <summary>
+    /// Clears overwrite confirmations for testing.
+    /// </summary>
+    internal static void ResetOverwriteConfirmationsForTesting()
+    {
+        lock (overwriteConfirmationLock)
+        {
+            overwriteConfirmations.Clear();
+        }
+    }
+
+    readonly struct OverwriteConfirmationKey : IEquatable<OverwriteConfirmationKey>
+    {
+        readonly Guid transferId;
+        readonly string fileName;
+
+        public OverwriteConfirmationKey(Guid transferId, string fileName)
+        {
+            this.transferId = transferId;
+            this.fileName = fileName ?? string.Empty;
+        }
+
+        public bool Equals(OverwriteConfirmationKey other)
+            => transferId == other.transferId
+            && string.Equals(fileName, other.fileName, StringComparison.OrdinalIgnoreCase);
+
+        public override bool Equals(object obj)
+            => obj is OverwriteConfirmationKey other && Equals(other);
+
+        public override int GetHashCode()
+            => HashCode.Combine(transferId, StringComparer.OrdinalIgnoreCase.GetHashCode(fileName));
     }
 
     /// <summary>
