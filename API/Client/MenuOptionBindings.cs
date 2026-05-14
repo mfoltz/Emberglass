@@ -411,7 +411,12 @@ public static class MenuOptionBindings
                     VWorld.LocalUser.GetUser(),
                     request,
                     TimeSpan.FromSeconds(SERVER_CONFIG_REQUEST_TIMEOUT_SECONDS),
-                    response => ApplyServerResponse(response, requestId),
+                    response => ApplyServerResponseOrRollback(
+                        response,
+                        requestId,
+                        binding.ChangedKey,
+                        ApplyServerResponse,
+                        RestoreLocalValue),
                     ex =>
                     {
                         VWorld.Log.LogWarning($"[MenuOptionBindings] Server config change failed ({binding.ChangedKey}): {ex.Message}");
@@ -489,6 +494,43 @@ public static class MenuOptionBindings
             {
                 liveSettings.RequestReload(reloadReason);
             }
+        }
+    }
+
+    /// <summary>
+    /// Applies a deferred server response and restores the local value if response application fails.
+    /// </summary>
+    /// <typeparam name="TValue">The menu option value type.</typeparam>
+    /// <param name="response">The server response payload.</param>
+    /// <param name="requestId">The request sequence identifier.</param>
+    /// <param name="bindingKey">The binding key used for diagnostics.</param>
+    /// <param name="applyServerResponse">The response application callback.</param>
+    /// <param name="restoreLocalValue">The rollback callback.</param>
+    internal static void ApplyServerResponseOrRollback<TValue>(
+        ServerConfigChangeResponse<TValue> response,
+        long requestId,
+        string bindingKey,
+        Action<ServerConfigChangeResponse<TValue>, long> applyServerResponse,
+        Action<long> restoreLocalValue)
+    {
+        if (applyServerResponse is null)
+        {
+            throw new ArgumentNullException(nameof(applyServerResponse));
+        }
+
+        if (restoreLocalValue is null)
+        {
+            throw new ArgumentNullException(nameof(restoreLocalValue));
+        }
+
+        try
+        {
+            applyServerResponse(response, requestId);
+        }
+        catch (Exception ex)
+        {
+            VWorld.Log?.LogWarning($"[MenuOptionBindings] Server config change failed ({bindingKey}): {ex.Message}");
+            restoreLocalValue(requestId);
         }
     }
 
