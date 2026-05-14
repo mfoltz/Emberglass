@@ -699,8 +699,14 @@ internal static class PacketRelay
     {
         if (_clientHandshakeComplete)
         {
-            VWorld.Log.LogInfo("[VNetwork.Handshake] client ignored key exchange after completion.");
-            return;
+            if (IsSignatureEmpty(exchange.SignatureSpan)
+                || !VerifyServerHelloSignature(remotePublicKey, exchange.NonceSpan, exchange.SignatureSpan))
+            {
+                VWorld.Log.LogInfo("[VNetwork.Handshake] client ignored key exchange after completion.");
+                return;
+            }
+
+            ResetClientHandshakeState(GetPlatformId(user), "authenticated server rehandshake");
         }
 
         if (IsSignatureEmpty(exchange.SignatureSpan))
