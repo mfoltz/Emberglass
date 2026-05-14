@@ -109,11 +109,44 @@ public static class VNetwork
     /// <param name="request">The request payload to send.</param>
     /// <param name="timeout">The amount of time to wait for a response.</param>
     /// <returns>A task that completes with the response payload.</returns>
+    /// <remarks>
+    /// This compatibility API completes pending tasks through the main-thread invoker when one is
+    /// available. Prefer <see cref="SendRequest" /> for Unity, IL2CPP, and ECS-facing code because
+    /// its callbacks are explicitly routed through the main-thread invoker.
+    /// </remarks>
     public static Task<TResponse> SendRequestAsync<TRequest, TResponse>(User target, TRequest request, TimeSpan timeout)
     {
         EnsureReady(nameof(SendRequestAsync));
         EnsureNetworkContext(nameof(SendRequestAsync));
         return RequestResponse.SendRequestAsync<TRequest, TResponse>(target, request, timeout);
+    }
+
+    /// <summary>
+    /// Sends a request payload to the target and invokes callbacks on the main thread when the
+    /// typed response arrives or the request fails.
+    /// </summary>
+    /// <typeparam name="TRequest">The request payload type.</typeparam>
+    /// <typeparam name="TResponse">The response payload type.</typeparam>
+    /// <param name="target">The remote user to receive the request when acting as a server.</param>
+    /// <param name="request">The request payload to send.</param>
+    /// <param name="timeout">The amount of time to wait for a response.</param>
+    /// <param name="onResponse">The callback invoked on the main thread when a response arrives.</param>
+    /// <param name="onError">The optional callback invoked on the main thread when the request fails.</param>
+    /// <remarks>
+    /// Prefer this callback API for Unity, IL2CPP, and ECS-facing code. <see cref="SendRequestAsync" />
+    /// remains available for compatibility, with task completion routed through the main-thread
+    /// invoker when one is available.
+    /// </remarks>
+    public static void SendRequest<TRequest, TResponse>(
+        User target,
+        TRequest request,
+        TimeSpan timeout,
+        Action<TResponse> onResponse,
+        Action<Exception> onError = null)
+    {
+        EnsureReady(nameof(SendRequest));
+        EnsureNetworkContext(nameof(SendRequest));
+        RequestResponse.SendRequest(target, request, timeout, onResponse, onError);
     }
 
     /// <summary>

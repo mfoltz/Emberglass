@@ -2,7 +2,6 @@ using BepInEx.Configuration;
 using Emberglass.API.Shared;
 using Emberglass.API.Shared.Config;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace Emberglass.API.Client;
 
@@ -394,10 +393,10 @@ public static class MenuOptionBindings
             }
 
             long requestId = Interlocked.Increment(ref requestSequence);
-            _ = SendServerChangeAsync(value, requestId);
+            SendServerChange(value, requestId);
         });
 
-        async Task SendServerChangeAsync(TValue value, long requestId)
+        void SendServerChange(TValue value, long requestId)
         {
             if (!VNetwork.IsReady || !VWorld.IsClient)
             {
@@ -408,12 +407,16 @@ public static class MenuOptionBindings
             try
             {
                 var request = new ServerConfigChangeRequest<TValue>(binding.ChangedKey, value);
-                var response = await VNetwork.SendRequestAsync<ServerConfigChangeRequest<TValue>, ServerConfigChangeResponse<TValue>>(
+                VNetwork.SendRequest<ServerConfigChangeRequest<TValue>, ServerConfigChangeResponse<TValue>>(
                     VWorld.LocalUser.GetUser(),
                     request,
-                    TimeSpan.FromSeconds(SERVER_CONFIG_REQUEST_TIMEOUT_SECONDS));
-
-                ApplyServerResponse(response, requestId);
+                    TimeSpan.FromSeconds(SERVER_CONFIG_REQUEST_TIMEOUT_SECONDS),
+                    response => ApplyServerResponse(response, requestId),
+                    ex =>
+                    {
+                        VWorld.Log.LogWarning($"[MenuOptionBindings] Server config change failed ({binding.ChangedKey}): {ex.Message}");
+                        RestoreLocalValue(requestId);
+                    });
             }
             catch (Exception ex)
             {
