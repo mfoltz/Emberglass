@@ -2,7 +2,6 @@ using BepInEx.Configuration;
 using Emberglass.API.Shared;
 using Emberglass.API.Shared.Config;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace Emberglass.API.Client;
 
@@ -394,10 +393,10 @@ public static class MenuOptionBindings
             }
 
             long requestId = Interlocked.Increment(ref requestSequence);
-            _ = SendServerChangeAsync(value, requestId);
+            SendServerChange(value, requestId);
         });
 
-        async Task SendServerChangeAsync(TValue value, long requestId)
+        void SendServerChange(TValue value, long requestId)
         {
             if (!VNetwork.IsReady || !VWorld.IsClient)
             {
@@ -408,12 +407,21 @@ public static class MenuOptionBindings
             try
             {
                 var request = new ServerConfigChangeRequest<TValue>(binding.ChangedKey, value);
-                var response = await VNetwork.SendRequestAsync<ServerConfigChangeRequest<TValue>, ServerConfigChangeResponse<TValue>>(
+                VNetwork.SendRequest<ServerConfigChangeRequest<TValue>, ServerConfigChangeResponse<TValue>>(
                     VWorld.LocalUser.GetUser(),
                     request,
-                    TimeSpan.FromSeconds(SERVER_CONFIG_REQUEST_TIMEOUT_SECONDS));
-
-                ApplyServerResponse(response, requestId);
+                    TimeSpan.FromSeconds(SERVER_CONFIG_REQUEST_TIMEOUT_SECONDS),
+                    response => ApplyServerResponseOrRollback(
+                        response,
+                        requestId,
+                        binding.ChangedKey,
+                        ApplyServerResponse,
+                        RestoreLocalValue),
+                    ex =>
+                    {
+                        VWorld.Log.LogWarning($"[MenuOptionBindings] Server config change failed ({binding.ChangedKey}): {ex.Message}");
+                        RestoreLocalValue(requestId);
+                    });
             }
             catch (Exception ex)
             {
@@ -486,6 +494,43 @@ public static class MenuOptionBindings
             {
                 liveSettings.RequestReload(reloadReason);
             }
+        }
+    }
+
+    /// <summary>
+    /// Applies a deferred server response and restores the local value if response application fails.
+    /// </summary>
+    /// <typeparam name="TValue">The menu option value type.</typeparam>
+    /// <param name="response">The server response payload.</param>
+    /// <param name="requestId">The request sequence identifier.</param>
+    /// <param name="bindingKey">The binding key used for diagnostics.</param>
+    /// <param name="applyServerResponse">The response application callback.</param>
+    /// <param name="restoreLocalValue">The rollback callback.</param>
+    internal static void ApplyServerResponseOrRollback<TValue>(
+        ServerConfigChangeResponse<TValue> response,
+        long requestId,
+        string bindingKey,
+        Action<ServerConfigChangeResponse<TValue>, long> applyServerResponse,
+        Action<long> restoreLocalValue)
+    {
+        if (applyServerResponse is null)
+        {
+            throw new ArgumentNullException(nameof(applyServerResponse));
+        }
+
+        if (restoreLocalValue is null)
+        {
+            throw new ArgumentNullException(nameof(restoreLocalValue));
+        }
+
+        try
+        {
+            applyServerResponse(response, requestId);
+        }
+        catch (Exception ex)
+        {
+            VWorld.Log?.LogWarning($"[MenuOptionBindings] Server config change failed ({bindingKey}): {ex.Message}");
+            restoreLocalValue(requestId);
         }
     }
 

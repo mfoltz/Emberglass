@@ -88,6 +88,7 @@ internal static class RequestResponse
         readonly CancellationTokenSource timeoutSource;
         readonly CancellationTokenRegistration timeoutRegistration;
         readonly ulong targetId;
+        int completionReserved;
 
         /// <summary>
         /// Initializes a new pending request with a timeout.
@@ -97,7 +98,7 @@ internal static class RequestResponse
         public PendingRequest(ulong targetId, TimeSpan timeout, Action onTimeout)
         {
             this.targetId = targetId;
-            completionSource = new TaskCompletionSource<TResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            completionSource = new TaskCompletionSource<TResponse>();
             timeoutSource = new CancellationTokenSource(timeout);
             timeoutRegistration = timeoutSource.Token.Register(onTimeout);
         }
@@ -119,11 +120,12 @@ internal static class RequestResponse
         /// <returns>True when the response was applied.</returns>
         public bool TrySetResult(TResponse response)
         {
-            if (!completionSource.TrySetResult(response))
+            if (!ReserveCompletion())
             {
                 return false;
             }
 
+            CompleteTask(() => completionSource.TrySetResult(response));
             Dispose();
             return true;
         }
@@ -134,10 +136,31 @@ internal static class RequestResponse
         /// <param name="exception">The exception to propagate.</param>
         public void TrySetException(Exception exception)
         {
-            if (completionSource.TrySetException(exception))
+            if (!ReserveCompletion())
             {
-                Dispose();
+                return;
             }
+
+            CompleteTask(() => completionSource.TrySetException(exception));
+            Dispose();
+        }
+
+        /// <summary>
+        /// Reserves the pending request completion so only one terminal state is applied.
+        /// </summary>
+        /// <returns>True when this caller owns completion.</returns>
+        bool ReserveCompletion()
+        {
+            return Interlocked.Exchange(ref completionReserved, 1) == 0;
+        }
+
+        /// <summary>
+        /// Completes the task on the main-thread invoker when one is available.
+        /// </summary>
+        /// <param name="complete">The completion action to execute.</param>
+        void CompleteTask(Action complete)
+        {
+            VBehaviour.RunOnMainThreadIfAvailable(complete);
         }
 
         /// <summary>
@@ -210,6 +233,80 @@ internal static class RequestResponse
     }
 
     /// <summary>
+    /// Sends a typed request and routes completion callbacks through the main-thread invoker.
+    /// </summary>
+    /// <typeparam name="TRequest">The request payload type.</typeparam>
+    /// <typeparam name="TResponse">The response payload type.</typeparam>
+    /// <param name="target">The remote user to receive the request when acting as a server.</param>
+    /// <param name="request">The request payload to send.</param>
+    /// <param name="timeout">The amount of time to wait for a response.</param>
+    /// <param name="onResponse">The callback invoked on the main thread when a response arrives.</param>
+    /// <param name="onError">The optional callback invoked on the main thread when the request fails.</param>
+    public static void SendRequest<TRequest, TResponse>(
+        User target,
+        TRequest request,
+        TimeSpan timeout,
+        Action<TResponse> onResponse,
+        Action<Exception> onError = null)
+    {
+        ArgumentNullException.ThrowIfNull(onResponse);
+        IMainThreadInvoker mainThreadInvoker = VBehaviour.MainThreadInvoker
+            ?? throw new InvalidOperationException("Request callbacks require VBehaviour.MainThreadInvoker.");
+        Task<TResponse> task;
+        try
+        {
+            task = SendRequestAsync<TRequest, TResponse>(target, request, timeout);
+        }
+        catch (Exception ex) when (onError is not null)
+        {
+            QueueError(onError, ex);
+            return;
+        }
+
+        CompleteOnMainThread(task, onResponse, onError);
+    }
+
+    /// <summary>
+    /// Routes a request task completion through the main-thread invoker.
+    /// </summary>
+    /// <typeparam name="TResponse">The response payload type.</typeparam>
+    /// <param name="task">The task to observe.</param>
+    /// <param name="onResponse">The callback invoked with the response.</param>
+    /// <param name="onError">The optional callback invoked with failures.</param>
+    internal static void CompleteOnMainThread<TResponse>(
+        Task<TResponse> task,
+        Action<TResponse> onResponse,
+        Action<Exception> onError)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(onResponse);
+
+        task.ContinueWith(
+            completedTask =>
+            {
+                if (completedTask.IsFaulted)
+                {
+                    Exception exception = completedTask.Exception?.GetBaseException()
+                        ?? new InvalidOperationException("Request failed.");
+                    QueueError(onError, exception);
+                    return;
+                }
+
+                if (completedTask.IsCanceled)
+                {
+                    QueueError(onError, new TaskCanceledException(completedTask));
+                    return;
+                }
+
+                TResponse response = completedTask.GetAwaiter().GetResult();
+                VBehaviour.RunOnMainThreadIfAvailable(() => onResponse(response));
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.None,
+            TaskScheduler.Default);
+    }
+
+    /// <summary>
     /// Registers a handler that responds to typed requests with typed responses.
     /// Pending requests are faulted if the remote user disconnects or the plugin shuts down.
     /// </summary>
@@ -241,6 +338,21 @@ internal static class RequestResponse
         TResponse responsePayload = handler(sender, envelope.Payload);
         ResponseEnvelope<TResponse> responseEnvelope = new(NextRequestId(), envelope.RequestId, responsePayload);
         SendResponseEnvelope(sender, requestDirection, responseEnvelope);
+    }
+
+    /// <summary>
+    /// Queues a request failure callback when one was provided.
+    /// </summary>
+    /// <param name="onError">The optional error callback.</param>
+    /// <param name="exception">The request failure.</param>
+    static void QueueError(Action<Exception> onError, Exception exception)
+    {
+        if (onError is null)
+        {
+            return;
+        }
+
+        VBehaviour.RunOnMainThreadIfAvailable(() => onError(exception));
     }
 
     /// <summary>

@@ -53,7 +53,7 @@ internal static class NetworkTesting
         }
 
         yield return _delay;
-        SendPingOnceAsync();
+        SendPingOnce();
     }
 
     /// <summary>
@@ -72,24 +72,36 @@ internal static class NetworkTesting
     /// <summary>
     /// Sends a single ping request and logs the round trip time.
     /// </summary>
-    static async void SendPingOnceAsync()
+    static void SendPingOnce()
     {
         long startTicks = DateTime.UtcNow.Ticks;
         try
         {
-            Pong pong = await API.Shared.VNetwork.SendRequestAsync<Ping, Pong>(
+            API.Shared.VNetwork.SendRequest<Ping, Pong>(
                 VWorld.LocalUser.GetUser(),
                 new Ping(startTicks),
-                TimeSpan.FromSeconds(REQUEST_TIMEOUT_SECONDS));
+                TimeSpan.FromSeconds(REQUEST_TIMEOUT_SECONDS),
+                pong =>
+                {
+                    long rttTicks = DateTime.UtcNow.Ticks - pong.ClientTicks;
+                    double ms = TimeSpan.FromTicks(rttTicks).TotalMilliseconds;
+                    double serverMs = TimeSpan.FromTicks(pong.ServerTicks - pong.ClientTicks).TotalMilliseconds;
+                    VWorld.Log.LogWarning($"[ServerPacketReceived] RTT ≈ {ms:F1} ms (server responded in {serverMs:F1} ms)");
+                },
+                exception =>
+                {
+                    if (exception is TimeoutException)
+                    {
+                        VWorld.Log.LogWarning("[PingPong.Client] Ping request timed out.");
+                        return;
+                    }
 
-            long rttTicks = DateTime.UtcNow.Ticks - pong.ClientTicks;
-            double ms = TimeSpan.FromTicks(rttTicks).TotalMilliseconds;
-            double serverMs = TimeSpan.FromTicks(pong.ServerTicks - pong.ClientTicks).TotalMilliseconds;
-            VWorld.Log.LogWarning($"[ServerPacketReceived] RTT ≈ {ms:F1} ms (server responded in {serverMs:F1} ms)");
+                    VWorld.Log.LogWarning($"[PingPong.Client] Ping request failed: {exception.Message}");
+                });
         }
-        catch (TimeoutException)
+        catch (Exception ex)
         {
-            VWorld.Log.LogWarning("[PingPong.Client] Ping request timed out.");
+            VWorld.Log.LogWarning($"[PingPong.Client] Ping request failed: {ex.Message}");
         }
     }
 }

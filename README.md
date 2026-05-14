@@ -15,7 +15,7 @@ For this beta, `VNetwork` is the headline stable public surface. Other APIs rema
 
 ## Networking Beta
 
-`VNetwork` lets mods register typed packets by direction and send them between client and server without owning a custom chat-message transport. The supported beta surface includes packet registration, send helpers, ready events, and request/response helpers.
+`VNetwork` lets mods register typed packets by direction and send them between client and server without owning a custom chat-message transport. The supported beta surface includes packet registration, send helpers, ready events, and request/response helpers. Prefer the callback request API for Unity, IL2CPP, and ECS-facing code because callbacks are explicitly routed through the main-thread invoker; the `SendRequestAsync` task API remains available for compatibility and completes through the main-thread invoker when one is available.
 
 Emberglass automatically generates and persists a server trust identity and P-256 signing keypair. Clients pin the first seen `(ServerTrustId, public key fingerprint)` when no explicit server key is configured. If a later connection presents a different key for the same trust ID, the handshake is rejected and the log includes a concise trust-remediation marker. Operators who want strict preconfiguration can still set `ServerPublicKeyBase64` manually.
 

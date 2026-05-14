@@ -9,10 +9,28 @@ public class VBehaviour : MonoBehaviour
 {
     public static VBehaviour Instance => _instance;
     static VBehaviour _instance;
+    static readonly object _mainThreadInvokerLock = new();
+    static IMainThreadInvoker _mainThreadInvoker;
     /// <summary>
     /// Gets the invoker used to schedule work on the main thread.
     /// </summary>
-    public static IMainThreadInvoker MainThreadInvoker { get; internal set; }
+    public static IMainThreadInvoker MainThreadInvoker
+    {
+        get
+        {
+            lock (_mainThreadInvokerLock)
+            {
+                return _mainThreadInvoker;
+            }
+        }
+        internal set
+        {
+            lock (_mainThreadInvokerLock)
+            {
+                _mainThreadInvoker = value;
+            }
+        }
+    }
     public static void Initialize()
     {
         ClassInjector.RegisterTypeInIl2Cpp<VBehaviour>();
@@ -26,7 +44,60 @@ public class VBehaviour : MonoBehaviour
             _instance = null;
         }
 
-        MainThreadInvoker = null;
+        DrainAndClearMainThreadInvoker();
+    }
+
+    /// <summary>
+    /// Drains queued main-thread work before clearing the invoker.
+    /// </summary>
+    internal static void DrainAndClearMainThreadInvoker()
+    {
+        IMainThreadInvoker mainThreadInvoker;
+        lock (_mainThreadInvokerLock)
+        {
+            mainThreadInvoker = _mainThreadInvoker;
+            _mainThreadInvoker = null;
+        }
+
+        try
+        {
+            mainThreadInvoker?.Drain();
+        }
+        catch (Exception ex)
+        {
+            VWorld.Log?.LogWarning($"[VBehaviour] Main-thread drain failed during shutdown: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Runs work on the active main-thread invoker, or inline when no invoker is active.
+    /// </summary>
+    /// <param name="action">The work to execute.</param>
+    internal static void RunOnMainThreadIfAvailable(Action action)
+    {
+        if (action is null)
+        {
+            throw new ArgumentNullException(nameof(action));
+        }
+
+        bool runInline;
+        lock (_mainThreadInvokerLock)
+        {
+            if (_mainThreadInvoker is null || _mainThreadInvoker.IsMainThread)
+            {
+                runInline = true;
+            }
+            else
+            {
+                _mainThreadInvoker.Run(action);
+                runInline = false;
+            }
+        }
+
+        if (runInline)
+        {
+            action();
+        }
     }
     void Awake()
     {

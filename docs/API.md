@@ -13,7 +13,7 @@ Status meanings:
 
 | API | Status | Notes |
 | --- | --- | --- |
-| `VNetwork` | Stable | Typed packet registration, send helpers, ready events, and request/response helpers for the networking beta. |
+| `VNetwork` | Stable | Typed packet registration, send helpers, ready events, and request/response helpers for the networking beta. Prefer callback request helpers for Unity/IL2CPP/ECS-facing code; `SendRequestAsync` remains available for compatibility and completes through the main-thread invoker when one is available. |
 | `VWorld` | Supporting | World/context utilities and shared state. |
 | `VEvents` | Experimental | Semantic runtime event helpers (`VEvents.IGameEvent`, `VEvents.GameEvent<T>`, `VEvents.ModuleRegistry`). Keep scoped to runtime facts while the subscription surface and observer proofs harden. |
 | `VBehaviour` | Supporting | Shared MonoBehaviour base. |
@@ -46,7 +46,7 @@ Status meanings:
 `ReloadPolicy.OnChange` by requesting reloads only when a menu option actually changes its value; `ReloadPolicy.None`
 and `ReloadPolicy.Manual` suppress automatic reloads so callers can opt out or trigger reloads explicitly.
 
-Server-scoped bindings (`ConfigScope.Server`) now use a request/response flow when driven by menu options:
+Server-scoped bindings (`ConfigScope.Server`) now use the main-thread callback request/response flow when driven by menu options:
 
 1. Client menu changes send `ServerConfigChangeRequest<TValue>` to the server.
 2. The server must register the binding with `ServerConfigChangeHandlers.RegisterBinding` (handled automatically

@@ -37,7 +37,14 @@ public sealed class MainThreadInvoker : IMainThreadInvoker
     {
         while (actionQueue.TryDequeue(out var action))
         {
-            action();
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                VWorld.Log?.LogWarning($"[MainThreadInvoker] Queued callback failed: {ex.Message}");
+            }
         }
     }
 }
