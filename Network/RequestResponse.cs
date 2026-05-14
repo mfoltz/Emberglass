@@ -256,6 +256,7 @@ internal static class RequestResponse
         Action<TResponse> onResponse,
         Action<Exception> onError = null)
     {
+        ArgumentNullException.ThrowIfNull(onResponse);
         IMainThreadInvoker mainThreadInvoker = VBehaviour.MainThreadInvoker
             ?? throw new InvalidOperationException("Request callbacks require VBehaviour.MainThreadInvoker.");
         Task<TResponse> task;
@@ -308,7 +309,7 @@ internal static class RequestResponse
                 }
 
                 TResponse response = completedTask.GetAwaiter().GetResult();
-                mainThreadInvoker.Run(() => onResponse(response));
+                RunOnActiveInvoker(mainThreadInvoker, () => onResponse(response));
             },
             CancellationToken.None,
             TaskContinuationOptions.None,
@@ -362,7 +363,30 @@ internal static class RequestResponse
             return;
         }
 
-        mainThreadInvoker.Run(() => onError(exception));
+        RunOnActiveInvoker(mainThreadInvoker, () => onError(exception));
+    }
+
+    /// <summary>
+    /// Runs work on the currently active main-thread invoker, or inline after shutdown.
+    /// </summary>
+    /// <param name="preferredInvoker">The invoker captured when the request was started.</param>
+    /// <param name="action">The callback to invoke.</param>
+    static void RunOnActiveInvoker(IMainThreadInvoker preferredInvoker, Action action)
+    {
+        IMainThreadInvoker activeInvoker = VBehaviour.MainThreadInvoker;
+        if (activeInvoker is null)
+        {
+            action();
+            return;
+        }
+
+        if (!ReferenceEquals(activeInvoker, preferredInvoker))
+        {
+            activeInvoker.Run(action);
+            return;
+        }
+
+        preferredInvoker.Run(action);
     }
 
     /// <summary>

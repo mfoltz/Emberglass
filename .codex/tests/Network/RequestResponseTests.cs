@@ -142,6 +142,7 @@ public sealed class RequestResponseTests : IDisposable
     {
         using PendingRequestScope pendingRequestScope = new();
         var invoker = new QueueingMainThreadInvoker();
+        using IDisposable invokerScope = new MainThreadInvokerScope(invoker);
         ResponsePacket? ReceivedResponse = null;
 
         Task<ResponsePacket> PendingTask = pendingRequestScope.AddPendingRequest<ResponsePacket>(
@@ -174,6 +175,7 @@ public sealed class RequestResponseTests : IDisposable
     {
         using PendingRequestScope pendingRequestScope = new();
         var invoker = new QueueingMainThreadInvoker();
+        using IDisposable invokerScope = new MainThreadInvokerScope(invoker);
         Exception? ReceivedException = null;
 
         Task<ResponsePacket> PendingTask = pendingRequestScope.AddPendingRequest<ResponsePacket>(
@@ -234,6 +236,67 @@ public sealed class RequestResponseTests : IDisposable
     }
 
     /// <summary>
+    /// Ensures invalid callbacks are rejected before request dispatch can create side effects.
+    /// </summary>
+    [Fact]
+    public void SendRequest_WithNullResponseCallback_ThrowsBeforeTrackingRequest()
+    {
+        const ulong PlatformId = 12003;
+        User Target = new();
+        using IDisposable runtimeContextScope = VWorld.BeginRuntimeContextOverride(isClient: false);
+        using IDisposable platformIdScope = PacketRelay.BeginPlatformIdOverride(user => PlatformId);
+        using IDisposable targetIdScope = RequestResponse.BeginTargetIdOverride(user => PlatformId);
+        using PendingRequestScope pendingRequestScope = new();
+        var invoker = new QueueingMainThreadInvoker();
+        using IDisposable invokerScope = new MainThreadInvokerScope(invoker);
+
+        SetVNetworkReady(true);
+
+        ArgumentNullException Exception = Assert.Throws<ArgumentNullException>(() =>
+            RequestResponse.SendRequest<RequestPacket, ResponsePacket>(
+                Target,
+                new RequestPacket(1),
+                TimeSpan.FromSeconds(30),
+                null!));
+
+        Assert.Equal("onResponse", Exception.ParamName);
+        Assert.Equal(0, pendingRequestScope.Count);
+        Assert.False(invoker.HasQueuedActions);
+    }
+
+    /// <summary>
+    /// Ensures callbacks are not stranded on an invoker that has been cleared during shutdown.
+    /// </summary>
+    [Fact]
+    public async Task CompleteOnMainThread_WhenCapturedInvokerIsCleared_DoesNotStrandFailureCallback()
+    {
+        using PendingRequestScope pendingRequestScope = new();
+        var invoker = new QueueingMainThreadInvoker();
+        using IDisposable invokerScope = new MainThreadInvokerScope(invoker);
+        var callbackSignal = new TaskCompletionSource<Exception>();
+
+        Task<ResponsePacket> PendingTask = pendingRequestScope.AddPendingRequest<ResponsePacket>(
+            requestId: 81,
+            targetId: 0,
+            timeout: TimeSpan.FromSeconds(30));
+
+        RequestResponse.CompleteOnMainThread(
+            PendingTask,
+            invoker,
+            _ => throw new InvalidOperationException("Unexpected request success."),
+            exception => callbackSignal.TrySetResult(exception));
+
+        VBehaviour.MainThreadInvoker = null;
+        pendingRequestScope.FaultPendingRequest(81, new InvalidOperationException("request failed"));
+
+        Assert.True(await WaitForSignalAsync(callbackSignal.Task));
+        Exception ReceivedException = await callbackSignal.Task;
+
+        Assert.Contains("request failed", ReceivedException.Message);
+        Assert.False(invoker.HasQueuedActions);
+    }
+
+    /// <summary>
     /// Restores mutable network state.
     /// </summary>
     public void Dispose()
@@ -252,6 +315,12 @@ public sealed class RequestResponseTests : IDisposable
     {
         await pendingTask;
         return Environment.CurrentManagedThreadId;
+    }
+
+    static async Task<bool> WaitForSignalAsync(Task task)
+    {
+        Task completedTask = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(3)));
+        return completedTask == task;
     }
 
     sealed class RequestPacket
@@ -364,6 +433,8 @@ public sealed class RequestResponseTests : IDisposable
         }
 
         public bool IsMainThread => isMainThread;
+
+        public bool HasQueuedActions => queuedActions.Count > 0;
 
         public int LastDrainThreadId { get; private set; }
 
