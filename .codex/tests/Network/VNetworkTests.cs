@@ -33,7 +33,7 @@ public sealed class VNetworkTests : IDisposable
         InvalidOperationException Exception = Assert.Throws<InvalidOperationException>(
             () => VNetwork.SendToServerStruct(new TestPacket(1)));
 
-        Assert.Contains("SendToServerStruct cannot be used before VNetwork.Initialize completes", Exception.Message);
+        Assert.Contains("SendToServerStruct cannot be used before the network session is ready", Exception.Message);
     }
 
     /// <summary>
@@ -47,7 +47,25 @@ public sealed class VNetworkTests : IDisposable
         InvalidOperationException Exception = Assert.Throws<InvalidOperationException>(
             () => VNetwork.SendToClientStruct(default(User), new TestPacket(1)));
 
-        Assert.Contains("SendToClientStruct cannot be used before VNetwork.Initialize completes", Exception.Message);
+        Assert.Contains("SendToClientStruct cannot be used before the network session is ready", Exception.Message);
+    }
+
+    /// <summary>
+    /// Ensures client readiness follows the authenticated session lifecycle.
+    /// </summary>
+    [Fact]
+    public void ClientSessionReadiness_TogglesAroundHandshake()
+    {
+        using IDisposable runtimeContextScope = VWorld.BeginRuntimeContextOverride(isClient: true);
+
+        SetIsReady(true);
+        VNetwork.MarkClientSessionNotReady();
+
+        Assert.False(VNetwork.IsReady);
+
+        VNetwork.RaiseClientReady();
+
+        Assert.True(VNetwork.IsReady);
     }
 
     /// <summary>

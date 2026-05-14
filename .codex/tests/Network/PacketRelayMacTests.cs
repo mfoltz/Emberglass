@@ -146,6 +146,37 @@ public sealed class PacketRelayMacTests
     }
 
     /// <summary>
+    /// Ensures a new client handshake clears stale session keys and readiness.
+    /// </summary>
+    [Fact]
+    public void ResetClientHandshakeState_ClearsClientMacAndReadiness()
+    {
+        Type PacketRelayType = GetPacketRelayType();
+        ComputeMacClientDelegate ComputeMacClient = GetComputeMacClient(PacketRelayType);
+        bool OriginalIsReady = VNetwork.IsReady;
+
+        using IDisposable runtimeContextScope = BeginRuntimeContextOverride(isClient: true);
+        using PacketRelayHmacScope HmacScope = new(PacketRelayType);
+
+        try
+        {
+            SetVNetworkReady(true);
+            HmacScope.SetClientHmac(FakeHmacKey, true);
+
+            Assert.NotEmpty(ComputeMacClient("packet|0/1|42|payload"));
+
+            PacketRelay.ResetClientHandshakeStateForTesting();
+
+            Assert.Empty(ComputeMacClient("packet|0/1|42|payload"));
+            Assert.False(VNetwork.IsReady);
+        }
+        finally
+        {
+            SetVNetworkReady(OriginalIsReady);
+        }
+    }
+
+    /// <summary>
     /// Resolves the packet relay type from the Emberglass assembly.
     /// </summary>
     /// <returns>The packet relay type.</returns>
@@ -260,6 +291,15 @@ public sealed class PacketRelayMacTests
     /// <returns>Delegate for client MAC computation.</returns>
     static ComputeMacClientDelegate GetComputeMacClient(Type packetRelayType)
         => CreateDelegate<ComputeMacClientDelegate>(packetRelayType, "ComputeMacClient");
+
+    static void SetVNetworkReady(bool isReady)
+    {
+        PropertyInfo Property = typeof(VNetwork).GetProperty(
+            nameof(VNetwork.IsReady),
+            BindingFlags.Static | BindingFlags.Public)
+            ?? throw new InvalidOperationException("VNetwork.IsReady property not found.");
+        Property.SetValue(null, isReady);
+    }
 
     /// <summary>
     /// Creates a delegate for a private static method.

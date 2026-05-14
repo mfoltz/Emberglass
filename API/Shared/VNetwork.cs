@@ -7,11 +7,12 @@ namespace Emberglass.API.Shared;
 public static class VNetwork
 {
     /// <summary>
-    /// Gets a value indicating whether the network stack has completed initialization.
+    /// Gets a value indicating whether the network stack can send authenticated packets.
     /// </summary>
     /// <remarks>
-    /// This becomes <see langword="true" /> once <see cref="Initialize" /> completes.
-    /// Use <see cref="OnReady" /> or <see cref="OnClientReady" /> to wait for readiness.
+    /// Server contexts become ready after initialization. Client contexts become ready only
+    /// after the server handshake completes and the session MAC is available.
+    /// Use <see cref="OnReady" /> or <see cref="OnClientReady" /> before sending packets.
     /// </remarks>
     public static bool IsReady { get; private set; }
 
@@ -241,14 +242,28 @@ public static class VNetwork
     {
         Bootstrapper.Awake();
         RequestResponse.Initialize();
-        IsReady = true;
+        IsReady = !VWorld.IsClient;
     }
 
     internal static void RaiseServerReady(User user)
-        => OnReady?.Invoke(user);
+    {
+        IsReady = true;
+        OnReady?.Invoke(user);
+    }
 
     internal static void RaiseClientReady()
-        => OnClientReady?.Invoke();
+    {
+        IsReady = true;
+        OnClientReady?.Invoke();
+    }
+
+    internal static void MarkClientSessionNotReady()
+    {
+        if (VWorld.IsClient)
+        {
+            IsReady = false;
+        }
+    }
 
     static void EnsureReady(string callerName)
     {
@@ -257,7 +272,7 @@ public static class VNetwork
             return;
         }
 
-        string message = $"[VNetwork] {callerName} cannot be used before VNetwork.Initialize completes. " +
+        string message = $"[VNetwork] {callerName} cannot be used before the network session is ready. " +
             "Wait for VNetwork.OnReady or VNetwork.OnClientReady before sending packets.";
         VWorld.Log?.LogError(message);
         throw new InvalidOperationException(message);

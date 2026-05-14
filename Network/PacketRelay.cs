@@ -501,8 +501,10 @@ internal static class PacketRelay
     }
     static void OnClientReady(ClientHandshake handshake)
     {
+        User localUser = VWorld.LocalUser.GetUser();
+        ResetClientHandshakeState(GetPlatformId(localUser), "client handshake start");
         VWorld.Log.LogInfo("[VNetwork.Handshake] client module ready; sending handshake start.");
-        SendHandshakePacketFromClient(VWorld.LocalUser.GetUser(), handshake);
+        SendHandshakePacketFromClient(localUser, handshake);
     }
     static void OnClientHandshake(User user)
     {
@@ -1329,18 +1331,51 @@ internal static class PacketRelay
     }
     public static void TryRemoveKey(ulong steamId)
     {
-        CleanupUserHandshakeState(steamId);
-
         if (VWorld.IsClient)
         {
-            _hmac?.Dispose();
-            _hmac = null;
-            _clientHandshakeComplete = false;
-            _publicKey = [];
-            _remotePublicKey = [];
-            _handshakeNonce = [];
-            _clientHandshakeProtocol = Const.PROTOCOL_VERSION;
-            _receivedAuthenticatedServerHello = false;
+            ResetClientHandshakeState(steamId, "key removed");
+            return;
+        }
+
+        CleanupUserHandshakeState(steamId);
+    }
+    /// <summary>
+    /// Resets client-side handshake state for tests.
+    /// </summary>
+    internal static void ResetClientHandshakeStateForTesting()
+        => ResetClientHandshakeState(null, "test");
+    /// <summary>
+    /// Clears client-side session keys and pending handshake state.
+    /// </summary>
+    /// <param name="steamId">Optional platform identifier for per-user ECDH cleanup.</param>
+    /// <param name="reason">Concise diagnostic reason.</param>
+    static void ResetClientHandshakeState(ulong? steamId, string reason)
+    {
+        bool hadSessionState = _clientHandshakeComplete
+            || _hmac != null
+            || _publicKey.Length > 0
+            || _remotePublicKey.Length > 0
+            || _handshakeNonce.Length > 0
+            || _receivedAuthenticatedServerHello;
+
+        if (steamId.HasValue)
+        {
+            CleanupUserHandshakeState(steamId.Value);
+        }
+
+        _hmac?.Dispose();
+        _hmac = null;
+        _clientHandshakeComplete = false;
+        _publicKey = [];
+        _remotePublicKey = [];
+        _handshakeNonce = [];
+        _clientHandshakeProtocol = Const.PROTOCOL_VERSION;
+        _receivedAuthenticatedServerHello = false;
+        API.Shared.VNetwork.MarkClientSessionNotReady();
+
+        if (hadSessionState)
+        {
+            VWorld.Log?.LogInfo($"[VNetwork.Handshake] client reset handshake state; reason={reason}.");
         }
     }
     /// <summary>
