@@ -115,6 +115,58 @@ public sealed class HandshakeSignatureConfigTests
     }
 
     /// <summary>
+    /// Ensures Base64 values with the wrong decoded key size are rejected.
+    /// </summary>
+    [Fact]
+    public void TryGetServerKeys_ReturnsFalseForWrongKeyLength()
+    {
+        Type ConfigType = GetHandshakeSignatureConfigType();
+        object Config = CreateConfigInstance(ConfigType);
+
+        SetPropertyValue(ConfigType, Config, "ServerPublicKeyBase64", Convert.ToBase64String(CreateSequence(P256PublicKeyLength - 1, 0x41)));
+        SetPropertyValue(ConfigType, Config, "ServerPrivateKeyBase64", Convert.ToBase64String(CreateSequence(P256PrivateKeyLength + 1, 0x51)));
+
+        bool PublicKeyResult = InvokeTryGetKey(Config, "TryGetServerPublicKey", out byte[] PublicKey);
+        bool PrivateKeyResult = InvokeTryGetKey(Config, "TryGetServerPrivateKey", out byte[] PrivateKey);
+
+        Assert.False(PublicKeyResult);
+        Assert.False(PrivateKeyResult);
+        Assert.Empty(PublicKey);
+        Assert.Empty(PrivateKey);
+    }
+
+    /// <summary>
+    /// Ensures server-side loading regenerates malformed key material instead of preserving it.
+    /// </summary>
+    [Fact]
+    public void LoadForServer_RegeneratesWrongLengthKeyPair()
+    {
+        Type ConfigType = GetHandshakeSignatureConfigType();
+
+        using ConfigPathScope Scope = new(ConfigType);
+
+        Directory.CreateDirectory(Scope.ConfigDirectoryPath);
+        File.WriteAllText(
+            Scope.ConfigFilePath,
+            "{"
+            + $"\"ServerPrivateKeyBase64\":\"{Convert.ToBase64String(CreateSequence(P256PrivateKeyLength - 1, 0x61))}\","
+            + $"\"ServerPublicKeyBase64\":\"{Convert.ToBase64String(CreateSequence(P256PublicKeyLength + 1, 0x71))}\","
+            + "\"ServerTrustId\":\"server-with-corrupt-keys\","
+            + "\"TrustedServers\":[]"
+            + "}");
+
+        object Config = InvokeStaticMethod(ConfigType, "LoadForServer");
+
+        bool PublicKeyResult = InvokeTryGetKey(Config, "TryGetServerPublicKey", out byte[] PublicKey);
+        bool PrivateKeyResult = InvokeTryGetKey(Config, "TryGetServerPrivateKey", out byte[] PrivateKey);
+
+        Assert.True(PublicKeyResult);
+        Assert.True(PrivateKeyResult);
+        Assert.Equal(P256PublicKeyLength, PublicKey.Length);
+        Assert.Equal(P256PrivateKeyLength, PrivateKey.Length);
+    }
+
+    /// <summary>
     /// Resolves the internal handshake configuration type from the Emberglass assembly.
     /// </summary>
     /// <returns>The handshake configuration type.</returns>

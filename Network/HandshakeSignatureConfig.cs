@@ -90,7 +90,7 @@ internal sealed class HandshakeSignatureConfig
     /// <param name="publicKey">Decoded public key bytes.</param>
     /// <returns>True when the key is available and decodes successfully.</returns>
     public bool TryGetServerPublicKey(out byte[] publicKey)
-        => TryDecodeKey(ServerPublicKeyBase64, out publicKey);
+        => TryDecodeKey(ServerPublicKeyBase64, SignaturesP256.PublicKeySize, out publicKey);
 
     /// <summary>
     /// Attempts to decode the server private key from Base64.
@@ -98,7 +98,7 @@ internal sealed class HandshakeSignatureConfig
     /// <param name="privateKey">Decoded private key bytes.</param>
     /// <returns>True when the key is available and decodes successfully.</returns>
     public bool TryGetServerPrivateKey(out byte[] privateKey)
-        => TryDecodeKey(ServerPrivateKeyBase64, out privateKey);
+        => TryDecodeKey(ServerPrivateKeyBase64, SignaturesP256.PrivateKeySize, out privateKey);
 
     /// <summary>
     /// Trusts or validates a server public key for the provided stable server trust identifier.
@@ -231,9 +231,10 @@ internal sealed class HandshakeSignatureConfig
     /// Attempts to decode a Base64 key string into bytes.
     /// </summary>
     /// <param name="base64">Base64-encoded key string.</param>
+    /// <param name="expectedLength">Expected decoded key length in bytes.</param>
     /// <param name="key">Decoded key bytes.</param>
-    /// <returns>True when the key decodes successfully.</returns>
-    static bool TryDecodeKey(string base64, out byte[] key)
+    /// <returns>True when the key decodes successfully and has the expected length.</returns>
+    static bool TryDecodeKey(string base64, int expectedLength, out byte[] key)
     {
         if (string.IsNullOrWhiteSpace(base64))
         {
@@ -244,7 +245,13 @@ internal sealed class HandshakeSignatureConfig
         try
         {
             key = Convert.FromBase64String(base64);
-            return key.Length > 0;
+            if (key.Length == expectedLength)
+            {
+                return true;
+            }
+
+            key = [];
+            return false;
         }
         catch (FormatException)
         {
