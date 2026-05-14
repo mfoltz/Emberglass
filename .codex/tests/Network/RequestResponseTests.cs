@@ -141,7 +141,7 @@ public sealed class RequestResponseTests : IDisposable
     public async Task CompleteOnMainThread_QueuesResponseCallbackOnMainThreadInvoker()
     {
         using PendingRequestScope pendingRequestScope = new();
-        var invoker = new QueueingMainThreadInvoker();
+        var invoker = new QueueingMainThreadInvoker(isMainThread: false);
         using IDisposable invokerScope = new MainThreadInvokerScope(invoker);
         ResponsePacket? ReceivedResponse = null;
 
@@ -152,7 +152,6 @@ public sealed class RequestResponseTests : IDisposable
 
         RequestResponse.CompleteOnMainThread(
             PendingTask,
-            invoker,
             response => ReceivedResponse = response,
             _ => throw new InvalidOperationException("Unexpected request failure."));
 
@@ -161,6 +160,8 @@ public sealed class RequestResponseTests : IDisposable
 
         Assert.Null(ReceivedResponse);
 
+        invoker.Drain();
+        Assert.True(await WaitForConditionAsync(() => invoker.HasQueuedActions));
         invoker.Drain();
 
         Assert.NotNull(ReceivedResponse);
@@ -174,7 +175,7 @@ public sealed class RequestResponseTests : IDisposable
     public async Task CompleteOnMainThread_QueuesFailureCallbackOnMainThreadInvoker()
     {
         using PendingRequestScope pendingRequestScope = new();
-        var invoker = new QueueingMainThreadInvoker();
+        var invoker = new QueueingMainThreadInvoker(isMainThread: false);
         using IDisposable invokerScope = new MainThreadInvokerScope(invoker);
         Exception? ReceivedException = null;
 
@@ -185,7 +186,6 @@ public sealed class RequestResponseTests : IDisposable
 
         RequestResponse.CompleteOnMainThread(
             PendingTask,
-            invoker,
             _ => throw new InvalidOperationException("Unexpected request success."),
             exception => ReceivedException = exception);
 
@@ -194,6 +194,8 @@ public sealed class RequestResponseTests : IDisposable
 
         Assert.Null(ReceivedException);
 
+        invoker.Drain();
+        Assert.True(await WaitForConditionAsync(() => invoker.HasQueuedActions));
         invoker.Drain();
 
         Assert.NotNull(ReceivedException);
@@ -212,7 +214,7 @@ public sealed class RequestResponseTests : IDisposable
         using IDisposable platformIdScope = PacketRelay.BeginPlatformIdOverride(user => PlatformId);
         using IDisposable targetIdScope = RequestResponse.BeginTargetIdOverride(user => PlatformId);
         using PendingRequestScope pendingRequestScope = new();
-        var invoker = new QueueingMainThreadInvoker();
+        var invoker = new QueueingMainThreadInvoker(isMainThread: false);
         using IDisposable invokerScope = new MainThreadInvokerScope(invoker);
         Exception? ReceivedException = null;
 
@@ -282,7 +284,6 @@ public sealed class RequestResponseTests : IDisposable
 
         RequestResponse.CompleteOnMainThread(
             PendingTask,
-            invoker,
             _ => throw new InvalidOperationException("Unexpected request success."),
             exception => callbackSignal.TrySetResult(exception));
 
@@ -321,6 +322,22 @@ public sealed class RequestResponseTests : IDisposable
     {
         Task completedTask = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(3)));
         return completedTask == task;
+    }
+
+    static async Task<bool> WaitForConditionAsync(Func<bool> condition)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(3);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (condition())
+            {
+                return true;
+            }
+
+            await Task.Delay(10);
+        }
+
+        return condition();
     }
 
     sealed class RequestPacket

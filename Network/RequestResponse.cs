@@ -160,14 +160,7 @@ internal static class RequestResponse
         /// <param name="complete">The completion action to execute.</param>
         void CompleteTask(Action complete)
         {
-            IMainThreadInvoker mainThreadInvoker = VBehaviour.MainThreadInvoker;
-            if (mainThreadInvoker is null || mainThreadInvoker.IsMainThread)
-            {
-                complete();
-                return;
-            }
-
-            mainThreadInvoker.Run(complete);
+            VBehaviour.RunOnMainThreadIfAvailable(complete);
         }
 
         /// <summary>
@@ -266,11 +259,11 @@ internal static class RequestResponse
         }
         catch (Exception ex) when (onError is not null)
         {
-            QueueError(mainThreadInvoker, onError, ex);
+            QueueError(onError, ex);
             return;
         }
 
-        CompleteOnMainThread(task, mainThreadInvoker, onResponse, onError);
+        CompleteOnMainThread(task, onResponse, onError);
     }
 
     /// <summary>
@@ -278,17 +271,14 @@ internal static class RequestResponse
     /// </summary>
     /// <typeparam name="TResponse">The response payload type.</typeparam>
     /// <param name="task">The task to observe.</param>
-    /// <param name="mainThreadInvoker">The invoker used to schedule callbacks.</param>
     /// <param name="onResponse">The callback invoked with the response.</param>
     /// <param name="onError">The optional callback invoked with failures.</param>
     internal static void CompleteOnMainThread<TResponse>(
         Task<TResponse> task,
-        IMainThreadInvoker mainThreadInvoker,
         Action<TResponse> onResponse,
         Action<Exception> onError)
     {
         ArgumentNullException.ThrowIfNull(task);
-        ArgumentNullException.ThrowIfNull(mainThreadInvoker);
         ArgumentNullException.ThrowIfNull(onResponse);
 
         task.ContinueWith(
@@ -298,18 +288,18 @@ internal static class RequestResponse
                 {
                     Exception exception = completedTask.Exception?.GetBaseException()
                         ?? new InvalidOperationException("Request failed.");
-                    QueueError(mainThreadInvoker, onError, exception);
+                    QueueError(onError, exception);
                     return;
                 }
 
                 if (completedTask.IsCanceled)
                 {
-                    QueueError(mainThreadInvoker, onError, new TaskCanceledException(completedTask));
+                    QueueError(onError, new TaskCanceledException(completedTask));
                     return;
                 }
 
                 TResponse response = completedTask.GetAwaiter().GetResult();
-                RunOnActiveInvoker(mainThreadInvoker, () => onResponse(response));
+                VBehaviour.RunOnMainThreadIfAvailable(() => onResponse(response));
             },
             CancellationToken.None,
             TaskContinuationOptions.None,
@@ -353,40 +343,16 @@ internal static class RequestResponse
     /// <summary>
     /// Queues a request failure callback when one was provided.
     /// </summary>
-    /// <param name="mainThreadInvoker">The invoker used to schedule callbacks.</param>
     /// <param name="onError">The optional error callback.</param>
     /// <param name="exception">The request failure.</param>
-    static void QueueError(IMainThreadInvoker mainThreadInvoker, Action<Exception> onError, Exception exception)
+    static void QueueError(Action<Exception> onError, Exception exception)
     {
         if (onError is null)
         {
             return;
         }
 
-        RunOnActiveInvoker(mainThreadInvoker, () => onError(exception));
-    }
-
-    /// <summary>
-    /// Runs work on the currently active main-thread invoker, or inline after shutdown.
-    /// </summary>
-    /// <param name="preferredInvoker">The invoker captured when the request was started.</param>
-    /// <param name="action">The callback to invoke.</param>
-    static void RunOnActiveInvoker(IMainThreadInvoker preferredInvoker, Action action)
-    {
-        IMainThreadInvoker activeInvoker = VBehaviour.MainThreadInvoker;
-        if (activeInvoker is null)
-        {
-            action();
-            return;
-        }
-
-        if (!ReferenceEquals(activeInvoker, preferredInvoker))
-        {
-            activeInvoker.Run(action);
-            return;
-        }
-
-        preferredInvoker.Run(action);
+        VBehaviour.RunOnMainThreadIfAvailable(() => onError(exception));
     }
 
     /// <summary>
