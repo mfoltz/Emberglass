@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.1
+
+- Hardened main-thread invoker shutdown so request completions and callbacks do not queue onto detached invokers during teardown.
+- Made queued main-thread callback draining resilient to individual callback failures.
+- Added network tests covering shutdown drain cleanup, stale-invoker request completion, and callback failure continuation.
+
 ## v0.1.0
 
 - Public networking beta centered on the stable `VNetwork` API.
