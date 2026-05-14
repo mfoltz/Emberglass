@@ -50,6 +50,32 @@ public sealed class RequestResponseTests : IDisposable
     }
 
     /// <summary>
+    /// Ensures client pending requests are faulted when the local client session resets.
+    /// </summary>
+    [Fact]
+    public async Task MarkClientSessionNotReady_FaultsPendingClientRequests()
+    {
+        using IDisposable runtimeContextScope = VWorld.BeginRuntimeContextOverride(isClient: true);
+        using PendingRequestScope pendingRequestScope = new();
+
+        Task<ResponsePacket> PendingTask = pendingRequestScope.AddPendingRequest<ResponsePacket>(
+            requestId: 42,
+            targetId: 0,
+            timeout: TimeSpan.FromSeconds(30));
+
+        SetVNetworkReady(true);
+
+        VNetwork.MarkClientSessionNotReady();
+
+        InvalidOperationException Exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await PendingTask);
+
+        Assert.Contains("client session disconnected or reset", Exception.Message);
+        Assert.Equal(0, pendingRequestScope.Count);
+        Assert.False(VNetwork.IsReady);
+    }
+
+    /// <summary>
     /// Restores mutable network state.
     /// </summary>
     public void Dispose()
@@ -81,12 +107,13 @@ public sealed class RequestResponseTests : IDisposable
     {
         readonly IDictionary pendingRequests;
         readonly Dictionary<object, object> originalEntries;
+        readonly Type requestResponseType;
 
         public PendingRequestScope()
         {
-            Type RequestResponseType = typeof(Registry).Assembly.GetType("Emberglass.Network.RequestResponse")
+            requestResponseType = typeof(Registry).Assembly.GetType("Emberglass.Network.RequestResponse")
                 ?? throw new InvalidOperationException("RequestResponse type not found.");
-            FieldInfo PendingRequestsField = RequestResponseType.GetField(
+            FieldInfo PendingRequestsField = requestResponseType.GetField(
                 "_pendingRequests",
                 BindingFlags.Static | BindingFlags.NonPublic)
                 ?? throw new InvalidOperationException("_pendingRequests field not found.");
@@ -106,6 +133,26 @@ public sealed class RequestResponseTests : IDisposable
         }
 
         public int Count => pendingRequests.Count;
+
+        public Task<TResponse> AddPendingRequest<TResponse>(long requestId, ulong targetId, TimeSpan timeout)
+        {
+            MethodInfo CreateMethod = requestResponseType.GetMethod(
+                "CreatePendingRequest",
+                BindingFlags.Static | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("CreatePendingRequest method not found.");
+            MethodInfo GenericMethod = CreateMethod.MakeGenericMethod(typeof(TResponse));
+            object Pending = GenericMethod.Invoke(null, new object[] { requestId, targetId, timeout })
+                ?? throw new InvalidOperationException("CreatePendingRequest returned null.");
+            pendingRequests[requestId] = Pending;
+
+            PropertyInfo TaskProperty = Pending.GetType().GetProperty(
+                "Task",
+                BindingFlags.Instance | BindingFlags.Public)
+                ?? throw new InvalidOperationException("Pending request Task property not found.");
+
+            return (Task<TResponse>)(TaskProperty.GetValue(Pending)
+                ?? throw new InvalidOperationException("Pending request Task value missing."));
+        }
 
         public void Dispose()
         {

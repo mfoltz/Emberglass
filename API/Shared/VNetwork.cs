@@ -265,6 +265,7 @@ public static class VNetwork
     {
         if (VWorld.IsClient)
         {
+            RequestResponse.FaultPendingClientRequests("the client session disconnected or reset.");
             IsReady = false;
         }
     }

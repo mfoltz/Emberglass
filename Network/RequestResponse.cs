@@ -444,6 +444,20 @@ internal static class RequestResponse
     }
 
     /// <summary>
+    /// Faults pending client-originated requests when the local session disconnects or resets.
+    /// </summary>
+    /// <param name="reason">Human-readable cancellation reason.</param>
+    internal static void FaultPendingClientRequests(string reason)
+    {
+        if (!VWorld.IsClient)
+        {
+            return;
+        }
+
+        FaultAndClearPendingRequests(reason);
+    }
+
+    /// <summary>
     /// Validates the timeout value for requests.
     /// </summary>
     /// <param name="timeout">The timeout duration.</param>
