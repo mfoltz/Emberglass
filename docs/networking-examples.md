@@ -2,6 +2,8 @@
 
 Emberglass networking examples are organized around primitives. Learn each primitive on its own, then compose them into paired-mod bridges such as the Bloodcraft/Eclipse client-feature flow.
 
+The compile-oriented sample code lives in `Network/Examples/PingPong.cs` as `NetworkingPrimitiveExamples`, with its packet DTOs in `Network/Examples/NetworkingExamplePackets.cs`. Treat these as demo code to copy and adapt, not as a public Emberglass API surface.
+
 ## Primitive Ladder
 
 ### Ready Gate

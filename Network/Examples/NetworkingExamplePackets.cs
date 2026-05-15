@@ -3,7 +3,7 @@ namespace Emberglass.Network.Examples;
 /// <summary>
 /// Describes a client feature registration message.
 /// </summary>
-public sealed class ClientFeatureRegistration
+internal sealed class ClientFeatureRegistration
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="ClientFeatureRegistration"/> class.
@@ -37,7 +37,7 @@ public sealed class ClientFeatureRegistration
 /// <summary>
 /// Describes a typed signal sent by a client.
 /// </summary>
-public sealed class ClientTypedSignal
+internal sealed class ClientTypedSignal
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="ClientTypedSignal"/> class.
@@ -64,7 +64,7 @@ public sealed class ClientTypedSignal
 /// <summary>
 /// Describes a typed signal sent by a server.
 /// </summary>
-public sealed class ServerTypedSignal
+internal sealed class ServerTypedSignal
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="ServerTypedSignal"/> class.
@@ -91,7 +91,7 @@ public sealed class ServerTypedSignal
 /// <summary>
 /// Describes a client request to change a server setting.
 /// </summary>
-public sealed class ServerSettingChangeRequest
+internal sealed class ServerSettingChangeRequest
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="ServerSettingChangeRequest"/> class.
@@ -125,7 +125,7 @@ public sealed class ServerSettingChangeRequest
 /// <summary>
 /// Describes the server receipt for a setting change request.
 /// </summary>
-public sealed class ServerSettingChangeReceipt
+internal sealed class ServerSettingChangeReceipt
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="ServerSettingChangeReceipt"/> class.
@@ -177,7 +177,7 @@ public sealed class ServerSettingChangeReceipt
 /// <summary>
 /// Describes server-owned feature state.
 /// </summary>
-public sealed class ServerFeatureState
+internal sealed class ServerFeatureState
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="ServerFeatureState"/> class.

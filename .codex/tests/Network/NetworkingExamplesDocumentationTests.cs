@@ -17,6 +17,9 @@ public sealed class NetworkingExamplesDocumentationTests
         Assert.Contains("Server Push", docs);
         Assert.Contains("Soft Bridge Migration", docs);
         Assert.Contains("Bloodcraft/Eclipse", docs);
+        Assert.Contains("Network/Examples/PingPong.cs", docs);
+        Assert.Contains("Network/Examples/NetworkingExamplePackets.cs", docs);
+        Assert.Contains("not as a public Emberglass API surface", docs);
     }
 
     [Fact]

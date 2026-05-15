@@ -38,11 +38,11 @@ internal static class NetworkingPrimitiveExamples
             {
                 VNetwork.OnClientReady += RegisterClientFeatureWhenReady;
                 clientReadySubscribed = true;
-            }
 
-            if (VNetwork.IsReady)
-            {
-                RegisterClientFeatureWhenReady();
+                if (VNetwork.IsReady)
+                {
+                    RegisterClientFeatureWhenReady();
+                }
             }
         }
     }
