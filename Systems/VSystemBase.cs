@@ -133,12 +133,26 @@ public sealed class VSystemBuilder
         => _named[name] = new QuerySpec(name, build, requireForUpdate, options);
 
     /// <summary>
-    /// Register a faux job entry for deterministic runtime binding without scheduling a job.
+    /// Register a chunk job entry for deterministic per-chunk execution against a named query.
+    /// </summary>
+    /// <typeparam name="TJob">Chunk job type whose fields will be inspected and refreshed.</typeparam>
+    /// <param name="queryName">Query name to associate with the chunk job plan.</param>
+    /// <param name="options">Optional job planning settings.</param>
+    public void ChunkJob<TJob>(string queryName = "Main", JobPlanOptions options = null)
+        where TJob : struct, IChunkJob
+        => AddJobPlan<TJob>(queryName, options);
+
+    /// <summary>
+    /// Register an experimental planned job entry for deterministic runtime binding.
     /// </summary>
     /// <typeparam name="TJob">Job type whose fields will be inspected.</typeparam>
     /// <param name="queryName">Query name to associate with the job plan.</param>
     /// <param name="options">Optional job planning settings.</param>
+    [Obsolete("Use ChunkJob<TJob> for chunk iteration. Non-chunk planned jobs remain experimental.")]
     public void FauxJob<TJob>(string queryName = "Main", JobPlanOptions options = null)
+        => AddJobPlan<TJob>(queryName, options);
+
+    void AddJobPlan<TJob>(string queryName, JobPlanOptions options)
     {
         var metadata = JobFieldInspector.Inspect(typeof(TJob));
         _jobPlans.Add(new JobPlanEntry(typeof(TJob), queryName, options, metadata));
@@ -1111,12 +1125,29 @@ public static class VQueryDsl
         return ref b;
     }
 }
+/// <summary>
+/// Defines a synchronous chunk iterator that Emberglass can run against an <see cref="EntityQuery"/>.
+/// </summary>
 public interface IChunkJob
 {
+    /// <summary>
+    /// Executes job logic for one archetype chunk.
+    /// </summary>
+    /// <param name="chunk">The chunk currently being processed.</param>
     void Execute(ref ArchetypeChunk chunk);
 }
+
+/// <summary>
+/// Provides deterministic, allocation-scoped chunk job execution helpers.
+/// </summary>
 public static class ChunkJobExtensions
 {
+    /// <summary>
+    /// Runs a chunk job synchronously across all chunks returned by the query.
+    /// </summary>
+    /// <typeparam name="T">Chunk job type.</typeparam>
+    /// <param name="query">Query to enumerate.</param>
+    /// <param name="job">Job instance to execute and retain by-ref state from.</param>
     public static void Run<T>(this EntityQuery query, ref T job)
         where T : struct, IChunkJob
     {

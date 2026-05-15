@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added an explicit experimental `VSystemBuilder.ChunkJob<TJob>` entry point for synchronous per-chunk `IChunkJob` scans.
+- Added self-contained tests for chunk-job handle metadata binding and related Unity handle stubs.
+
 ## v0.1.1
 
 - Hardened main-thread invoker shutdown so request completions and callbacks do not queue onto detached invokers during teardown.

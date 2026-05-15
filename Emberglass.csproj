@@ -17,7 +17,7 @@
         <NuGetAudit>False</NuGetAudit>
     </PropertyGroup>
 	
-    <Target Name="BuildToServer" AfterTargets="Build">
+    <Target Name="BuildToServer" AfterTargets="Build" Condition="'$(DeployToServer)' != 'false'">
         <PropertyGroup>
             <DefaultOutputDir>C:\Program Files (x86)\Steam\steamapps\common\VRisingDedicatedServer\BepInEx\plugins</DefaultOutputDir>
             <TempOutputDir>$(TargetDir)ServerPlugins</TempOutputDir>
@@ -27,7 +27,7 @@
         <Copy SourceFiles="$(TargetDir)$(ProjectName).dll" DestinationFolder="$(TempOutputDir)" Condition="!Exists('$(DefaultOutputDir)')" ContinueOnError="true" />
     </Target>
 
-    <Target Name="BuildToClient" AfterTargets="Build">
+    <Target Name="BuildToClient" AfterTargets="Build" Condition="'$(DeployToClient)' != 'false'">
         <PropertyGroup>
             <DefaultOutputDir>C:\Program Files (x86)\Steam\steamapps\common\VRising\BepInEx\plugins</DefaultOutputDir>
             <TempOutputDir>$(TargetDir)ClientPlugins</TempOutputDir>
