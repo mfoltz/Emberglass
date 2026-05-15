@@ -1,107 +1,146 @@
 using Emberglass.API.Shared;
+using ProjectM.Network;
 using System;
-using System.Collections;
-using Unity.Entities;
-using UnityEngine;
+using System.Collections.Generic;
 
 namespace Emberglass.Network.Examples;
+
 /// <summary>
-/// Represents a ping request containing client ticks.
+/// Compile-oriented examples that show how to compose VNetwork primitives.
 /// </summary>
-internal readonly struct Ping(long ticks)
+internal static class NetworkingPrimitiveExamples
 {
-    public readonly long ClientTicks = ticks;
-}
-/// <summary>
-/// Represents a pong response containing client and server ticks.
-/// </summary>
-internal readonly struct Pong(long cTicks, long sTicks)
-{
-    public readonly long ClientTicks = cTicks;
-    public readonly long ServerTicks = sTicks;
-}
-internal static class NetworkTesting
-{
+    const string FEATURE_NAME = "ExampleClientFeature";
+    const string FEATURE_VERSION = "1.0.0";
+    const string SETTING_KEY = "example.enabled";
+    const int REQUEST_TIMEOUT_SECONDS = 10;
+
+    static readonly Dictionary<ulong, ClientFeatureRegistration> registeredFeatures = [];
+    static bool localOptimisticValue;
+    static bool localAuthoritativeValue;
+
     /// <summary>
-    /// Demonstrates request/response messaging with a ping/pong exchange.
+    /// Registers packet handlers and readiness callbacks for the current runtime.
     /// </summary>
-    public static void PingPong()
+    public static void Initialize()
     {
+        if (VWorld.IsServer)
+        {
+            RegisterServerHandlers();
+        }
+
         if (VWorld.IsClient)
         {
-            DelayedPing().Run();
-        }
-        else if (VWorld.IsServer)
-        {
-            RegisterPingHandler();
+            RegisterClientHandlers();
+            VNetwork.OnClientReady += RegisterClientFeatureWhenReady;
+
+            if (VNetwork.IsReady)
+            {
+                RegisterClientFeatureWhenReady();
+            }
         }
     }
 
-    const float DELAY = 60f;
-    const int REQUEST_TIMEOUT_SECONDS = 10;
-    static readonly WaitForSeconds _delay = new(DELAY);
-    public static bool _ready = false;
     /// <summary>
-    /// Waits for readiness before sending the first ping request.
+    /// Demonstrates a client-originated request with rollback to the authoritative value.
     /// </summary>
-    /// <returns>An enumerator for the coroutine.</returns>
-    static IEnumerator DelayedPing()
+    /// <param name="requestedValue">The optimistic setting value requested by the client.</param>
+    public static void RequestServerSettingChange(bool requestedValue)
     {
-        while (!_ready)
+        if (!VWorld.IsClient || !VNetwork.IsReady)
         {
-            yield return null;
+            RestoreAuthoritativeValue();
+            return;
         }
 
-        yield return _delay;
-        SendPingOnce();
+        localOptimisticValue = requestedValue;
+
+        VNetwork.SendRequest<ServerSettingChangeRequest, ServerSettingChangeReceipt>(
+            VWorld.LocalUser.GetUser(),
+            new ServerSettingChangeRequest(SETTING_KEY, requestedValue),
+            TimeSpan.FromSeconds(REQUEST_TIMEOUT_SECONDS),
+            ApplyServerReceipt,
+            exception =>
+            {
+                VWorld.Log.LogWarning($"[NetworkingExamples] setting change failed: {exception.Message}");
+                RestoreAuthoritativeValue();
+            });
     }
 
     /// <summary>
-    /// Registers a request handler that responds to pings with pong payloads.
+    /// Demonstrates a soft bridge decision point without owning the legacy transport.
     /// </summary>
-    static void RegisterPingHandler()
+    /// <param name="sendLegacy">Compatibility sender used when Emberglass is unavailable.</param>
+    public static void SendWithLegacyFallback(Action sendLegacy)
     {
-        VWorld.Log.LogWarning("[PingPong.Server] Registering -> RequestResponse(Ping/Pong)");
-        API.Shared.VNetwork.RegisterRequestHandler<Ping, Pong>((sender, ping) =>
+        ArgumentNullException.ThrowIfNull(sendLegacy);
+
+        if (!VNetwork.IsReady)
         {
-            VWorld.Log.LogWarning($"[ClientPacketReceived] Received ping from {sender.PlatformId}");
-            return new Pong(ping.ClientTicks, DateTime.UtcNow.Ticks);
+            sendLegacy();
+            return;
+        }
+
+        VNetwork.SendToServer(new ClientTypedSignal("sent through Emberglass"));
+    }
+
+    static void RegisterServerHandlers()
+    {
+        VNetwork.RegisterServerbound<ClientTypedSignal>((sender, packet) =>
+            VWorld.Log.LogInfo($"[NetworkingExamples] client signal from {sender.PlatformId}: {packet.Message}"));
+
+        VNetwork.RegisterServerbound<ClientFeatureRegistration>((sender, packet) =>
+        {
+            registeredFeatures[sender.PlatformId] = packet;
+            VWorld.Log.LogInfo(
+                $"[NetworkingExamples] registered {packet.FeatureName} {packet.FeatureVersion} for {sender.PlatformId}");
+            VNetwork.SendToClient(sender, new ServerFeatureState(packet.FeatureName, progress: 1, status: "registered"));
         });
+
+        VNetwork.RegisterRequestHandler<ServerSettingChangeRequest, ServerSettingChangeReceipt>(
+            (_, request) => ValidateServerSettingChange(request));
     }
 
-    /// <summary>
-    /// Sends a single ping request and logs the round trip time.
-    /// </summary>
-    static void SendPingOnce()
+    static void RegisterClientHandlers()
     {
-        long startTicks = DateTime.UtcNow.Ticks;
-        try
-        {
-            API.Shared.VNetwork.SendRequest<Ping, Pong>(
-                VWorld.LocalUser.GetUser(),
-                new Ping(startTicks),
-                TimeSpan.FromSeconds(REQUEST_TIMEOUT_SECONDS),
-                pong =>
-                {
-                    long rttTicks = DateTime.UtcNow.Ticks - pong.ClientTicks;
-                    double ms = TimeSpan.FromTicks(rttTicks).TotalMilliseconds;
-                    double serverMs = TimeSpan.FromTicks(pong.ServerTicks - pong.ClientTicks).TotalMilliseconds;
-                    VWorld.Log.LogWarning($"[ServerPacketReceived] RTT ≈ {ms:F1} ms (server responded in {serverMs:F1} ms)");
-                },
-                exception =>
-                {
-                    if (exception is TimeoutException)
-                    {
-                        VWorld.Log.LogWarning("[PingPong.Client] Ping request timed out.");
-                        return;
-                    }
+        VNetwork.RegisterClientbound<ServerTypedSignal>((_, packet) =>
+            VWorld.Log.LogInfo($"[NetworkingExamples] server signal: {packet.Message}"));
 
-                    VWorld.Log.LogWarning($"[PingPong.Client] Ping request failed: {exception.Message}");
-                });
-        }
-        catch (Exception ex)
+        VNetwork.RegisterClientbound<ServerFeatureState>((_, packet) =>
+            VWorld.Log.LogInfo($"[NetworkingExamples] {packet.FeatureName} state: {packet.Status} ({packet.Progress})"));
+    }
+
+    static void RegisterClientFeatureWhenReady()
+    {
+        VNetwork.SendToServer(new ClientFeatureRegistration(FEATURE_NAME, FEATURE_VERSION));
+    }
+
+    static ServerSettingChangeReceipt ValidateServerSettingChange(ServerSettingChangeRequest request)
+    {
+        bool accepted = string.Equals(request.RequestKey, SETTING_KEY, StringComparison.Ordinal);
+        bool authoritativeValue = accepted && request.RequestedValue;
+        string rejectionReason = accepted ? string.Empty : "Unknown setting.";
+
+        return new ServerSettingChangeReceipt(
+            request.RequestKey,
+            authoritativeValue,
+            accepted,
+            rejectionReason);
+    }
+
+    static void ApplyServerReceipt(ServerSettingChangeReceipt receipt)
+    {
+        if (!receipt.IsAccepted && !string.IsNullOrWhiteSpace(receipt.RejectionReason))
         {
-            VWorld.Log.LogWarning($"[PingPong.Client] Ping request failed: {ex.Message}");
+            VWorld.Log.LogWarning($"[NetworkingExamples] setting rejected: {receipt.RejectionReason}");
         }
+
+        localAuthoritativeValue = receipt.AuthoritativeValue;
+        localOptimisticValue = receipt.AuthoritativeValue;
+    }
+
+    static void RestoreAuthoritativeValue()
+    {
+        localOptimisticValue = localAuthoritativeValue;
     }
 }
