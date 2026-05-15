@@ -182,6 +182,13 @@ public static class StubAssemblyResolver
         readonly bool enableStubLogging;
         readonly object syncRoot = new();
         readonly Dictionary<string, Type> createdTypes = new(StringComparer.Ordinal);
+        static readonly Dictionary<string, string[]> KnownGenericValueTypes = new(StringComparer.Ordinal)
+        {
+            ["Unity.Entities.ComponentTypeHandle`1"] = new[] { "T" },
+            ["Unity.Entities.BufferTypeHandle`1"] = new[] { "T" },
+            ["Unity.Entities.ComponentLookup`1"] = new[] { "T" },
+            ["Unity.Entities.BufferLookup`1"] = new[] { "T" }
+        };
 
         /// <summary>
         /// Creates a stub assembly for a missing runtime dependency.
@@ -385,12 +392,22 @@ public static class StubAssemblyResolver
         /// <returns>The type builder.</returns>
         TypeBuilder DefineTypeBuilder(string fullTypeName)
         {
-            return IsKnownValueType(fullTypeName)
-                ? moduleBuilder.DefineType(
+            if (IsKnownValueType(fullTypeName))
+            {
+                TypeBuilder valueTypeBuilder = moduleBuilder.DefineType(
                     fullTypeName,
                     TypeAttributes.Public | TypeAttributes.SequentialLayout | TypeAttributes.Sealed | TypeAttributes.AnsiClass | TypeAttributes.BeforeFieldInit,
-                    typeof(ValueType))
-                : moduleBuilder.DefineType(fullTypeName, TypeAttributes.Public | TypeAttributes.Class);
+                    typeof(ValueType));
+
+                if (KnownGenericValueTypes.TryGetValue(fullTypeName, out string[]? genericParameterNames))
+                {
+                    valueTypeBuilder.DefineGenericParameters(genericParameterNames);
+                }
+
+                return valueTypeBuilder;
+            }
+
+            return moduleBuilder.DefineType(fullTypeName, TypeAttributes.Public | TypeAttributes.Class);
         }
 
         /// <summary>
@@ -401,6 +418,11 @@ public static class StubAssemblyResolver
         static bool IsKnownValueType(string fullTypeName)
             => string.Equals(fullTypeName, "ProjectM.Network.User", StringComparison.Ordinal)
                 || string.Equals(fullTypeName, "Unity.Entities.Entity", StringComparison.Ordinal)
+                || string.Equals(fullTypeName, "Unity.Entities.ArchetypeChunk", StringComparison.Ordinal)
+                || string.Equals(fullTypeName, "Unity.Entities.EntityTypeHandle", StringComparison.Ordinal)
+                || string.Equals(fullTypeName, "Unity.Entities.EntityStorageInfoLookup", StringComparison.Ordinal)
+                || string.Equals(fullTypeName, "Unity.Entities.EntityQueryOptions", StringComparison.Ordinal)
+                || KnownGenericValueTypes.ContainsKey(fullTypeName)
                 || string.Equals(fullTypeName, "ProjectM.Network.NetworkIdSystem+Singleton", StringComparison.Ordinal)
                 || string.Equals(fullTypeName, "ProjectM.Network.NetworkIdSystem.Singleton", StringComparison.Ordinal);
 
@@ -1181,9 +1203,17 @@ public static class StubAssemblyResolver
                 "Unity.Entities" => new[]
                 {
                     "Unity.Entities.Entity",
+                    "Unity.Entities.ArchetypeChunk",
+                    "Unity.Entities.EntityTypeHandle",
+                    "Unity.Entities.EntityStorageInfoLookup",
+                    "Unity.Entities.ComponentTypeHandle`1",
+                    "Unity.Entities.BufferTypeHandle`1",
+                    "Unity.Entities.ComponentLookup`1",
+                    "Unity.Entities.BufferLookup`1",
                     "Unity.Entities.World",
                     "Unity.Entities.EntityManager",
-                    "Unity.Entities.ComponentSystemBase"
+                    "Unity.Entities.ComponentSystemBase",
+                    "Unity.Entities.EntityQueryOptions"
                 },
                 "UnityEngine.CoreModule" => new[] { "UnityEngine.MonoBehaviour", "UnityEngine.WaitForSeconds" },
                 "ProjectM.Shared" => new[] { "ProjectM.WorldUtility", "ProjectM.Network.NetworkIdSystem+Singleton", "Singleton", "ProjectM.Network.User" },

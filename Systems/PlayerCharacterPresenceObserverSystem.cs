@@ -15,15 +15,18 @@ public sealed class PlayerCharacterPresenceObserverSystem : SystemBase
 
     EntityQuery userQuery;
     EntityStorageInfoLookup entityStorageInfoLookup;
-    bool userQueryCreated;
+
+    public override void OnCreate()
+    {
+        userQuery = CreateUserQuery();
+        entityStorageInfoLookup = GetEntityStorageInfoLookup();
+    }
 
     public override void OnDestroy()
     {
         lastCharacterBySteamId.Clear();
         seenSteamIdsThisTick.Clear();
         staleSteamIds.Clear();
-
-        base.OnDestroy();
     }
 
     public override void OnUpdate()
@@ -33,7 +36,6 @@ public sealed class PlayerCharacterPresenceObserverSystem : SystemBase
             return;
         }
 
-        EnsureUserQuery();
         entityStorageInfoLookup.Update(this);
         seenSteamIdsThisTick.Clear();
 
@@ -131,13 +133,8 @@ public sealed class PlayerCharacterPresenceObserverSystem : SystemBase
     bool IsAttachedCharacter(Entity characterEntity)
         => characterEntity != Entity.Null && entityStorageInfoLookup.Exists(characterEntity);
 
-    void EnsureUserQuery()
+    EntityQuery CreateUserQuery()
     {
-        if (userQueryCreated)
-        {
-            return;
-        }
-
         EntityQueryBuilder queryBuilder = new(Allocator.Temp);
         try
         {
@@ -145,14 +142,11 @@ public sealed class PlayerCharacterPresenceObserverSystem : SystemBase
                 .WithAllRO<User>()
                 .IncludeDisabled();
 
-            userQuery = EntityManager.CreateEntityQuery(ref queryBuilder);
+            return EntityManager.CreateEntityQuery(ref queryBuilder);
         }
         finally
         {
             queryBuilder.Dispose();
         }
-
-        entityStorageInfoLookup = GetEntityStorageInfoLookup();
-        userQueryCreated = true;
     }
 }
