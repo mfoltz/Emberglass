@@ -6,7 +6,7 @@ Emberglass is a networking beta for [V Rising](https://playvrising.com/) mods bu
 
 The beta is being prepared for [Thunderstore][thunderstore] and GitHub Releases and currently focuses on:
 
-* Typed packet networking via `VNetwork`; see PingPong under `Network/Examples` for guidance.
+* Typed packet networking via `VNetwork`; see [Networking Examples](docs/networking-examples.md) for primitive-first guidance.
 * Authenticated handshake setup with a client-side trust-on-first-use pin, plus an advanced explicit server public-key override.
 * Runtime plugin sharing of preloaded mods from servers to clients.
 * Custom keybind and menu option helpers.
