@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.1.2
+
 - Added an explicit experimental `VSystemBuilder.ChunkJob<TJob>` entry point for synchronous per-chunk `IChunkJob` scans.
 - Added self-contained tests for chunk-job handle metadata binding and related Unity handle stubs.
 

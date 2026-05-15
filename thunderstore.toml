@@ -1,7 +1,7 @@
 [package]
 namespace = "zfolmt"
 name = "Emberglass"
-versionNumber = "0.1.1"
+versionNumber = "0.1.2"
 description = "Networking beta for V Rising modders: typed VNetwork client/server packets with trust-pinned authenticated handshakes."
 websiteUrl = "https://github.com/mfoltz/Emberglass"
 containsNsfwContent = false
