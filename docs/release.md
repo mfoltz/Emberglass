@@ -11,31 +11,38 @@ Bloodcraft is the current concrete CI precedent for Thunderstore publication. It
    - `thunderstore.toml` `versionNumber`
    - `manifest.json` `version_number`
    - latest `CHANGELOG.md` entry
-2. For release-bound PRs, record changes under `## Unreleased`, then run the bump helper once before merge:
+2. For release-bound PRs, use the release hygiene gate before merge when the branch has meaningful source, API, script, or workflow changes:
 
    ```powershell
-   pwsh .codex/scripts/bump-version.ps1 -Version 0.1.2
+   pwsh .codex/scripts/release-nudge.ps1
+   ```
+
+   The nudge blocks by default when changelog or version-bump review is needed. It does not edit files or auto-bump versions. Use `-WarnOnly` only for local draft inspection when you are not ready to satisfy the gate yet.
+3. Record changes under `## Unreleased`, then run the bump helper once before merge:
+
+   ```powershell
+   pwsh .codex/scripts/bump-version.ps1 -Version 0.1.4
    ```
 
    The helper updates all version metadata and moves the current `Unreleased` notes into `## vX.Y.Z`, leaving a fresh empty `Unreleased` section for the next pass. Use a plain canonical `X.Y.Z`; CI derives `-pre` and feature-testing suffixes instead of committing them.
-3. Run the local metadata gate:
+4. Run the local metadata gate:
 
    ```bash
    bash .codex/scripts/version-metadata.sh
    ```
 
-4. Run the repo gates from the intended release commit:
+5. Run the repo gates from the intended release commit:
    - `git diff --check`
    - `bash .codex/install.sh`
    - `.codex/tests/Network`
-5. Rehearse the Thunderstore package locally and inspect the zip contents before upload:
+6. Rehearse the Thunderstore package locally and inspect the zip contents before upload:
 
    ```powershell
    pwsh .codex/scripts/package-thunderstore.ps1
    ```
 
-6. Create a GitHub Release artifact from the same commit and binary hash intended for public release.
-7. Publish to Thunderstore from the existing GitHub Release artifact through a manual CI workflow, not from an ad hoc local upload.
+7. Create a GitHub Release artifact from the same commit and binary hash intended for public release.
+8. Publish to Thunderstore from the existing GitHub Release artifact through a manual CI workflow, not from an ad hoc local upload.
 
 ## Publication policy
 
