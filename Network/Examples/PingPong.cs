@@ -16,6 +16,7 @@ internal static class NetworkingPrimitiveExamples
     const int REQUEST_TIMEOUT_SECONDS = 10;
 
     static readonly Dictionary<ulong, ClientFeatureRegistration> registeredFeatures = [];
+    static bool clientReadySubscribed;
     static bool localOptimisticValue;
     static bool localAuthoritativeValue;
 
@@ -32,7 +33,12 @@ internal static class NetworkingPrimitiveExamples
         if (VWorld.IsClient)
         {
             RegisterClientHandlers();
-            VNetwork.OnClientReady += RegisterClientFeatureWhenReady;
+
+            if (!clientReadySubscribed)
+            {
+                VNetwork.OnClientReady += RegisterClientFeatureWhenReady;
+                clientReadySubscribed = true;
+            }
 
             if (VNetwork.IsReady)
             {
@@ -75,7 +81,7 @@ internal static class NetworkingPrimitiveExamples
     {
         ArgumentNullException.ThrowIfNull(sendLegacy);
 
-        if (!VNetwork.IsReady)
+        if (!VWorld.IsClient || !VNetwork.IsReady)
         {
             sendLegacy();
             return;
