@@ -421,6 +421,7 @@ public static class StubAssemblyResolver
                 || string.Equals(fullTypeName, "Unity.Entities.ArchetypeChunk", StringComparison.Ordinal)
                 || string.Equals(fullTypeName, "Unity.Entities.EntityTypeHandle", StringComparison.Ordinal)
                 || string.Equals(fullTypeName, "Unity.Entities.EntityStorageInfoLookup", StringComparison.Ordinal)
+                || string.Equals(fullTypeName, "Unity.Entities.EntityQuery", StringComparison.Ordinal)
                 || string.Equals(fullTypeName, "Unity.Entities.EntityQueryOptions", StringComparison.Ordinal)
                 || KnownGenericValueTypes.ContainsKey(fullTypeName)
                 || string.Equals(fullTypeName, "ProjectM.Network.NetworkIdSystem+Singleton", StringComparison.Ordinal)
@@ -1212,7 +1213,9 @@ public static class StubAssemblyResolver
                     "Unity.Entities.BufferLookup`1",
                     "Unity.Entities.World",
                     "Unity.Entities.EntityManager",
+                    "Unity.Entities.EntityQuery",
                     "Unity.Entities.ComponentSystemBase",
+                    "Unity.Entities.SystemBase",
                     "Unity.Entities.EntityQueryOptions"
                 },
                 "UnityEngine.CoreModule" => new[] { "UnityEngine.MonoBehaviour", "UnityEngine.WaitForSeconds" },

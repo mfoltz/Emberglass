@@ -90,5 +90,5 @@ and "Reload required" when applicable.
 
 | API | Status | Notes |
 | --- | --- | --- |
-| `VSystemBase` | Experimental | Non-generic ECS system helper plus `InstallWork<TWork>` bridge for query/handle setup. Keep ChunkJob and native-resource planning experimental until a runtime proof promotes the surface. |
-| `VSystemBuilder.ChunkJob<TJob>` / `IChunkJob` | Experimental | Synchronous per-chunk iteration over a named query, with refreshed handles/lookups and scoped temp chunk allocation. Intended for simple Bloodcraft-style query scans, not command buffers or deferred mutation queues. |
+| `VSystemBase` | Experimental | Non-generic ECS system helper plus `InstallWork<TWork>` bridge for query/handle setup. Keep ChunkJob and native-resource planning experimental until a runtime proof promotes the surface. See the [SystemBase foundation posture](systembase.md) for the supported contribution shape and parked follow-ups. |
+| `VSystemBuilder.ChunkJob<TJob>` / `IChunkJob` | Experimental | Synchronous per-chunk iteration over a named query, with refreshed handles/lookups and scoped temp chunk allocation. Intended for simple Bloodcraft-style query scans, not command buffers, deferred mutation queues, or broad scheduling abstractions. |
