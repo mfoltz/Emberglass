@@ -25,8 +25,19 @@ public static class VExtensions
         FixedString512Bytes fixedMessage = new(message);
         ServerChatUtils.SendSystemMessageToClient(VWorld.Server.EntityManager, user, ref fixedMessage);
     }
-    static void With<T>(this Entity entity, ActionRefHandler<T> action) where T : struct
+    /// <summary>
+    /// Mutates an existing component in place when the entity has that component.
+    /// </summary>
+    /// <typeparam name="T">Component type to mutate.</typeparam>
+    /// <param name="entity">Entity that may own the component.</param>
+    /// <param name="action">Mutation callback that receives the component by reference.</param>
+    public static void With<T>(this Entity entity, ActionRefHandler<T> action) where T : struct
     {
+        if (!entity.Has<T>())
+        {
+            return;
+        }
+
         T item = entity.Read<T>();
         action(ref item);
 
@@ -50,11 +61,18 @@ public static class VExtensions
     }
     public static void Write<T>(this Entity entity, T componentData) where T : struct
     {
+        if (!entity.Has<T>())
+        {
+            return;
+        }
+
         EntityManager.SetComponentData(entity, componentData);
     }
     public static T Read<T>(this Entity entity) where T : struct
     {
-        return EntityManager.GetComponentData<T>(entity);
+        return EntityManager.TryGetComponentData<T>(entity, out T componentData)
+            ? componentData
+            : default;
     }
     public static Entity Create(this ComponentType[] components)
     {
@@ -67,7 +85,9 @@ public static class VExtensions
     }
     public static DynamicBuffer<T> ReadBuffer<T>(this Entity entity) where T : struct
     {
-        return EntityManager.GetBuffer<T>(entity);
+        return entity.TryGetBuffer(out DynamicBuffer<T> dynamicBuffer)
+            ? dynamicBuffer
+            : default;
     }
     public static DynamicBuffer<T> AddBuffer<T>(this Entity entity) where T : struct
     {
@@ -84,6 +104,33 @@ public static class VExtensions
         }
 
         return false;
+    }
+    /// <summary>
+    /// Attempts to read a dynamic buffer from an existing entity.
+    /// </summary>
+    /// <typeparam name="T">Buffer element type.</typeparam>
+    /// <param name="entity">Entity that may own the buffer.</param>
+    /// <param name="dynamicBuffer">Buffer value when found.</param>
+    /// <returns>True when the buffer exists and is created.</returns>
+    public static bool TryGetBuffer<T>(this Entity entity, out DynamicBuffer<T> dynamicBuffer) where T : struct
+    {
+        dynamicBuffer = default;
+
+        if (!entity.Exists() || !entity.Has<T>())
+        {
+            return false;
+        }
+
+        try
+        {
+            dynamicBuffer = EntityManager.GetBuffer<T>(entity);
+            return dynamicBuffer.IsCreated;
+        }
+        catch (InvalidOperationException)
+        {
+            dynamicBuffer = default;
+            return false;
+        }
     }
     public static bool Has<T>(this Entity entity) where T : struct
     {
@@ -180,6 +227,28 @@ public static class VExtensions
     {
         return entity.Has<Disabled>();
     }
+    /// <summary>
+    /// Removes the Disabled component when the entity is currently disabled.
+    /// </summary>
+    /// <param name="entity">Entity to enable.</param>
+    public static void Enable(this Entity entity)
+    {
+        if (entity.IsDisabled())
+        {
+            entity.Remove<Disabled>();
+        }
+    }
+    /// <summary>
+    /// Adds the Disabled component when the entity is currently enabled.
+    /// </summary>
+    /// <param name="entity">Entity to disable.</param>
+    public static void Disable(this Entity entity)
+    {
+        if (!entity.IsDisabled())
+        {
+            entity.Add<Disabled>();
+        }
+    }
     public static bool IsPlayer(this Entity entity)
     {
         return entity.Has<PlayerCharacter>();
@@ -210,6 +279,50 @@ public static class VExtensions
         }
 
         return User.Empty;
+    }
+    /// <summary>
+    /// Checks whether an entity has a User component.
+    /// </summary>
+    /// <param name="entity">Entity to inspect.</param>
+    /// <returns>True when the entity is a user entity.</returns>
+    public static bool IsUser(this Entity entity)
+    {
+        return entity.Has<User>();
+    }
+    /// <summary>
+    /// Resolves the user entity from either a player character or user entity.
+    /// </summary>
+    /// <param name="entity">Player character or user entity.</param>
+    /// <returns>The matching user entity, or Entity.Null when unavailable.</returns>
+    public static Entity GetUserEntity(this Entity entity)
+    {
+        if (entity.TryGetComponent(out PlayerCharacter playerCharacter))
+        {
+            return playerCharacter.UserEntity;
+        }
+
+        return entity.IsUser()
+            ? entity
+            : Entity.Null;
+    }
+    /// <summary>
+    /// Resolves the platform ID from either a player character or user entity.
+    /// </summary>
+    /// <param name="entity">Player character or user entity.</param>
+    /// <returns>The platform ID, or zero when unavailable.</returns>
+    public static ulong GetSteamId(this Entity entity)
+    {
+        if (entity.TryGetComponent(out PlayerCharacter playerCharacter))
+        {
+            return playerCharacter.UserEntity.GetUser().PlatformId;
+        }
+
+        if (entity.TryGetComponent(out User user))
+        {
+            return user.PlatformId;
+        }
+
+        return default;
     }
     public static User GetUser(this FromCharacter fromCharacter)
     {
@@ -301,6 +414,31 @@ public static class VExtensions
     {
         NativeArray<Entity> entities = entityQuery.ToEntityArray(allocator);
         return new(entities);
+    }
+    /// <summary>
+    /// Checks whether an index can be read from a dynamic buffer.
+    /// </summary>
+    /// <typeparam name="T">Buffer element type.</typeparam>
+    /// <param name="buffer">Buffer to inspect.</param>
+    /// <param name="index">Index to test.</param>
+    /// <returns>True when the buffer is created and the index is in range.</returns>
+    public static bool IsIndexWithinRange<T>(this DynamicBuffer<T> buffer, int index) where T : struct
+    {
+        return buffer.IsCreated
+            && index >= 0
+            && index < buffer.Length;
+    }
+    /// <summary>
+    /// Reads the first dynamic buffer element when one exists.
+    /// </summary>
+    /// <typeparam name="T">Buffer element type.</typeparam>
+    /// <param name="buffer">Buffer to inspect.</param>
+    /// <returns>The first element, or default when the buffer is empty or unavailable.</returns>
+    public static T FirstOrDefault<T>(this DynamicBuffer<T> buffer) where T : struct
+    {
+        return buffer.IsIndexWithinRange(0)
+            ? buffer[0]
+            : default;
     }
     public static NativeAccessor<T> ToComponentDataArrayAccessor<T>(this EntityQuery entityQuery, Allocator allocator = Allocator.Temp) where T : unmanaged
     {

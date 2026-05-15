@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.1.3
+
+- Added low-risk shared extension parity for safe component mutation, buffer reads, entity enable/disable, and player identity helpers.
+- Added coroutine delay, byte truthiness, configurable string matching, and Il2Cpp dictionary reversal utility helpers.
+- Added a soft release nudge script that warns when meaningful source/API changes should prompt changelog and version-bump consideration.
+
 ## v0.1.2
 
 - Added an explicit experimental `VSystemBuilder.ChunkJob<TJob>` entry point for synchronous per-chunk `IChunkJob` scans.
