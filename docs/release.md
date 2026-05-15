@@ -45,6 +45,17 @@ Bloodcraft is the current concrete CI precedent for Thunderstore publication. It
 - Do not publish from a local working tree.
 - Do not publish if package metadata, README, changelog, binary hash, network tests, trust bootstrap, or the Bloodcraft/Eclipse enabled bridge proof are out of sync.
 
+## Windows/Codex GitHub auth note
+
+On this Windows workstation, `gh auth status` from a Codex shell can report `The token in default is invalid`
+even when Git HTTPS push and GitHub connector PR operations are healthy through their own credential paths.
+Treat that as an execution-boundary signal, not immediate proof that credentials are globally broken.
+
+Before asking for re-authentication or changing credentials, prefer the GitHub connector for PR inspection or
+creation when it is available. Verify CLI-only work from the same keyring-aware boundary that will run it, and
+keep `git push` evidence separate from `gh` CLI evidence because Git Credential Manager can succeed when `gh`
+cannot.
+
 ## Remaining before public release
 
 - Review the manual Emberglass release workflow in `.github/workflows/release.yml` after the final package artifact exists.
