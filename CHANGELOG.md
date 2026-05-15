@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.1.5
+
+- Documented the experimental SystemBase foundation posture and the parked resource naming boundary.
+- Expanded self-contained VSystemBase tests for lookup/handle access intent, refresh ordering, and missing builder declarations.
+
 ## v0.1.4
 
 - Changed the release nudge into a default-blocking release hygiene gate, with `-WarnOnly` retained for local draft inspection.

@@ -651,14 +651,26 @@ public abstract class VSystemBase : SystemBase
         OnWorkUpdate(_ctx!);
     }
     void UpdateUpdatablesAndRefresh()
+        => RefreshUpdatablesAndActions(_updatables, _refreshActions, this);
+
+    /// <summary>
+    /// Refreshes registered handles/lookups before executing custom refresh callbacks.
+    /// </summary>
+    /// <param name="updatables">Registered handles and lookups to update.</param>
+    /// <param name="refreshActions">Custom refresh callbacks to run after handle refresh.</param>
+    /// <param name="system">System instance used to refresh ECS handles.</param>
+    internal static void RefreshUpdatablesAndActions(
+        IReadOnlyList<IUpdatableHandle> updatables,
+        IReadOnlyList<Action<SystemBase>> refreshActions,
+        SystemBase system)
     {
         // Update all requested handles/lookups
-        for (int i = 0; i < _updatables.Count; i++)
-            _updatables[i].Update(this);
+        for (int i = 0; i < updatables.Count; i++)
+            updatables[i].Update(system);
 
         // Run custom refresh actions
-        for (int i = 0; i < _refreshActions.Count; i++)
-            _refreshActions[i](this);
+        for (int i = 0; i < refreshActions.Count; i++)
+            refreshActions[i](system);
     }
 
     /// <summary>
@@ -750,12 +762,12 @@ public abstract class VSystemBase : SystemBase
         var fieldType = fieldInfo.Field.FieldType;
         if (TryGetAccessWrapperValueType(fieldType, out var wrappedType))
         {
-            object value = GetUpdatableValue(wrappedType);
+            object value = GetRequiredUpdatableValue(_updatables, wrappedType);
             return Activator.CreateInstance(fieldType, value)
                 ?? throw new InvalidOperationException($"Failed to create wrapper '{fieldType}'.");
         }
 
-        return GetUpdatableValue(fieldInfo.ValueType);
+        return GetRequiredUpdatableValue(_updatables, fieldInfo.ValueType);
     }
 
     /// <summary>
@@ -939,11 +951,13 @@ public abstract class VSystemBase : SystemBase
     /// </summary>
     /// <param name="requestedType">The requested value type.</param>
     /// <returns>The updatable handle value.</returns>
-    object GetUpdatableValue(Type requestedType)
+    internal static object GetRequiredUpdatableValue(
+        IReadOnlyList<IUpdatableHandle> updatables,
+        Type requestedType)
     {
-        for (int i = 0; i < _updatables.Count; i++)
+        for (int i = 0; i < updatables.Count; i++)
         {
-            var updatable = _updatables[i];
+            var updatable = updatables[i];
             if (requestedType == typeof(EntityTypeHandle) && updatable is EntityTypeHandleRef entityTypeHandle)
             {
                 return entityTypeHandle.Value;
@@ -977,7 +991,10 @@ public abstract class VSystemBase : SystemBase
             }
         }
 
-        throw new InvalidOperationException($"No updatable handle registered for '{requestedType}'.");
+        throw new InvalidOperationException(
+            $"No updatable handle registered for '{requestedType}'. Declare it in Configure with "
+            + "VSystemBuilder.EntityTypeHandle(), EntityStorageInfoLookup(), ComponentTypeHandle<T>(), "
+            + "BufferTypeHandle<T>(), ComponentLookup<T>(), or BufferLookup<T>() before using it in a planned job field.");
     }
 
     // ---- Temp iteration helpers (Allocator.Temp + try/finally) ----

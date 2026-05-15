@@ -22,6 +22,7 @@ Emberglass automatically generates and persists a server trust identity and P-25
 Legacy transport paths exist for compatibility with older consumer builds, but new integrations should prefer `VNetwork`.
 
 See the [API inventory](docs/API.md) for the current public surface and stability labels.
+See the [SystemBase foundation posture](docs/systembase.md) for the experimental ECS helper boundary.
 See the [Release Flow](docs/release.md) for the Thunderstore/GitHub release posture and metadata gates.
 See the [Bloodcraft/Eclipse bridge proof runbook](docs/testing/bloodcraft-eclipse-bridge-proof.md) for the current manual end-to-end networking proof shape.
 
