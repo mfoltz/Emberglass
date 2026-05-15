@@ -74,6 +74,15 @@ public static class IExtensions
     }
 
     /// <summary>
+    /// Checks whether the source string contains any candidate using ordinal case-insensitive matching.
+    /// </summary>
+    /// <param name="stringChars">String to inspect.</param>
+    /// <param name="strings">Candidate substrings.</param>
+    /// <returns>True when at least one candidate is present.</returns>
+    public static bool ContainsAny(this string stringChars, List<string> strings)
+        => stringChars.ContainsAny(strings, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Checks whether the source string contains any candidate using the requested comparison behavior.
     /// </summary>
     /// <param name="stringChars">String to inspect.</param>
@@ -83,7 +92,7 @@ public static class IExtensions
     public static bool ContainsAny(
         this string stringChars,
         List<string> strings,
-        StringComparison stringComparison = StringComparison.OrdinalIgnoreCase)
+        StringComparison stringComparison)
     {
         foreach (string str in strings)
         {

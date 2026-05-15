@@ -29,8 +29,21 @@ public sealed class IExtensionsUtilityTests
     {
         List<string> candidates = new() { "alpha" };
 
+        Assert.True("ALPHA".ContainsAny(candidates));
         Assert.False("ALPHA".ContainsAny(candidates, StringComparison.Ordinal));
         Assert.True("ALPHA".ContainsAny(candidates, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Ensures the pre-existing two-argument ContainsAny overload remains available to compiled consumers.
+    /// </summary>
+    [Fact]
+    public void ContainsAny_PreservesTwoArgumentOverload()
+    {
+        Assert.Contains(
+            typeof(IExtensions).GetMethods(BindingFlags.Public | BindingFlags.Static),
+            Method => Method.Name == nameof(IExtensions.ContainsAny)
+                && Method.GetParameters().Length == 2);
     }
 
     /// <summary>
