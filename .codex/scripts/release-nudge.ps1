@@ -3,7 +3,7 @@ param(
 
     [int]$LineThreshold = 120,
 
-    [switch]$FailOnNudge
+    [switch]$WarnOnly
 )
 
 Set-StrictMode -Version Latest
@@ -80,7 +80,7 @@ if ([string]::IsNullOrWhiteSpace($BaseRef)) {
 
 $MergeBase = Invoke-Git -Arguments @("merge-base", "HEAD", $BaseRef) 2>$null
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($MergeBase)) {
-    Write-Host "release-nudge: unable to resolve merge-base for '$BaseRef'; skipping soft nudge."
+    Write-Host "release-nudge: unable to resolve merge-base for '$BaseRef'; skipping release hygiene gate."
     exit 0
 }
 
@@ -129,6 +129,6 @@ if ($HasUnreleasedNotes) {
 if ($script:NudgeCount -eq 0) {
     Write-Host "release-nudge: no changelog or version-bump nudge needed."
 }
-elseif ($FailOnNudge.IsPresent) {
+elseif (-not $WarnOnly.IsPresent) {
     exit 1
 }

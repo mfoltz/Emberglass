@@ -11,17 +11,17 @@ Bloodcraft is the current concrete CI precedent for Thunderstore publication. It
    - `thunderstore.toml` `versionNumber`
    - `manifest.json` `version_number`
    - latest `CHANGELOG.md` entry
-2. For release-bound PRs, use the soft nudge before merge when the branch has meaningful source, API, script, or workflow changes:
+2. For release-bound PRs, use the release hygiene gate before merge when the branch has meaningful source, API, script, or workflow changes:
 
    ```powershell
    pwsh .codex/scripts/release-nudge.ps1
    ```
 
-   The nudge only warns by default. It does not edit files, auto-bump versions, or block local work unless explicitly run with `-FailOnNudge`.
+   The nudge blocks by default when changelog or version-bump review is needed. It does not edit files or auto-bump versions. Use `-WarnOnly` only for local draft inspection when you are not ready to satisfy the gate yet.
 3. Record changes under `## Unreleased`, then run the bump helper once before merge:
 
    ```powershell
-   pwsh .codex/scripts/bump-version.ps1 -Version 0.1.3
+   pwsh .codex/scripts/bump-version.ps1 -Version 0.1.4
    ```
 
    The helper updates all version metadata and moves the current `Unreleased` notes into `## vX.Y.Z`, leaving a fresh empty `Unreleased` section for the next pass. Use a plain canonical `X.Y.Z`; CI derives `-pre` and feature-testing suffixes instead of committing them.

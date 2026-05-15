@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.1.4
+
+- Changed the release nudge into a default-blocking release hygiene gate, with `-WarnOnly` retained for local draft inspection.
+
 ## v0.1.3
 
 - Added low-risk shared extension parity for safe component mutation, buffer reads, entity enable/disable, and player identity helpers.
