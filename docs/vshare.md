@@ -32,7 +32,8 @@ so clients stay in control of what gets downloaded.
 
 Shared clientbound mods require `BepInEx/config/Emberglass/ShareMetadata.json` metadata. A mod can be offered to clients
 when it is marked with `ClientSafe: true` or includes the `client` tag/category. Runtime loading is a separate opt-in:
-only entries that are also marked `HotloadAllowed: true` are offered with hotload enabled.
+only DLL entries that are also marked `HotloadAllowed: true` are offered with hotload enabled. Metadata may be keyed by
+the staged release asset base name or by the GitHub repo/plugin name parsed from release-style staged assets.
 
 Example:
 

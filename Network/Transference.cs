@@ -2970,10 +2970,11 @@ internal static class Transference
         public HashSet<string> Hashes { get; } = hashes;
     }
 
-    readonly struct SharedModEntry(string fileName, string baseName, string sha256, bool isZip)
+    readonly struct SharedModEntry(string fileName, string baseName, string metadataBaseName, string sha256, bool isZip)
     {
         public string FileName { get; } = fileName;
         public string BaseName { get; } = baseName;
+        public string MetadataBaseName { get; } = metadataBaseName;
         public string Sha256 { get; } = sha256;
         public bool IsZip { get; } = isZip;
     }
@@ -3524,7 +3525,7 @@ internal static class Transference
                 continue;
             }
 
-            entries.Add(new SharedModEntry(fileName, baseName, digest, isZip));
+            entries.Add(new SharedModEntry(fileName, baseName, identity.Repo, digest, isZip));
         }
 
         return entries;
@@ -3711,20 +3712,87 @@ internal static class Transference
         out PluginShareMetadataStore.PluginShareMetadata metadata,
         out string skipReason)
     {
-        if (!_shareMetadataStore.TryGetPluginMetadata(entry.BaseName, out metadata, out string errorMessage))
+        var errors = new List<string>();
+        foreach (string metadataKey in GetShareMetadataKeys(entry))
         {
-            skipReason = errorMessage;
-            return false;
+            if (_shareMetadataStore.TryGetPluginMetadata(metadataKey, out metadata, out string errorMessage))
+            {
+                if (IsClientShareAllowed(metadata))
+                {
+                    skipReason = string.Empty;
+                    return true;
+                }
+
+                skipReason = "Missing required client tag or ClientSafe flag in share metadata.";
+                return false;
+            }
+
+            errors.Add(errorMessage);
         }
 
-        if (IsClientShareAllowed(metadata))
-        {
-            skipReason = string.Empty;
-            return true;
-        }
-
-        skipReason = "Missing required client tag or ClientSafe flag in share metadata.";
+        metadata = default;
+        skipReason = string.Join(" ", errors);
         return false;
+    }
+
+    /// <summary>
+    /// Gets metadata lookup keys for a shared mod entry.
+    /// </summary>
+    /// <param name="entry">The shared mod entry.</param>
+    /// <returns>The ordered metadata keys to try.</returns>
+    static IReadOnlyList<string> GetShareMetadataKeys(SharedModEntry entry)
+        => GetShareMetadataKeys(entry.BaseName, entry.MetadataBaseName);
+
+    /// <summary>
+    /// Gets metadata lookup keys for a staged asset file.
+    /// </summary>
+    /// <param name="stagedFileName">The staged asset file name.</param>
+    /// <returns>The ordered metadata keys to try.</returns>
+    internal static IReadOnlyList<string> GetShareMetadataKeysForTesting(string stagedFileName)
+    {
+        string baseName = Path.GetFileNameWithoutExtension(stagedFileName);
+        string metadataBaseName = string.Empty;
+        if (TryResolveGitHubReleaseIdentityFromStagedFileName(
+                stagedFileName,
+                out GitHubReleaseClient.GitHubReleaseIdentity identity,
+                out _))
+        {
+            metadataBaseName = identity.Repo;
+        }
+
+        return GetShareMetadataKeys(baseName, metadataBaseName);
+    }
+
+    /// <summary>
+    /// Gets ordered metadata lookup keys from staged and human-legible names.
+    /// </summary>
+    /// <param name="baseName">The staged asset base name.</param>
+    /// <param name="metadataBaseName">The preferred metadata base name.</param>
+    /// <returns>The ordered metadata keys to try.</returns>
+    static IReadOnlyList<string> GetShareMetadataKeys(string baseName, string metadataBaseName)
+    {
+        var keys = new List<string>(capacity: 2);
+        AddMetadataKey(keys, baseName);
+        AddMetadataKey(keys, metadataBaseName);
+        return keys;
+    }
+
+    /// <summary>
+    /// Adds a unique metadata key to a lookup list.
+    /// </summary>
+    /// <param name="keys">The key list to update.</param>
+    /// <param name="key">The key candidate.</param>
+    static void AddMetadataKey(List<string> keys, string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        if (!keys.Contains(key, StringComparer.OrdinalIgnoreCase))
+        {
+            keys.Add(key);
+        }
     }
 
     /// <summary>
