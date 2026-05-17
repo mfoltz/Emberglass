@@ -11,18 +11,19 @@ namespace Emberglass.Tests.Network;
 public sealed class HotloadPluginResultTests
 {
     /// <summary>
-    /// Ensures hotloading an assembly that is already loaded is reported as a guarded failure.
+    /// Ensures hotloading can reuse an already loaded candidate assembly for retry attempts.
     /// </summary>
     [Fact]
-    public void HotloadPluginResult_RejectsAlreadyLoadedAssemblyPath()
+    public void HotloadPluginResult_ReusesAlreadyLoadedCandidateAssembly()
     {
         string assemblyPath = typeof(Transference).Assembly.Location;
 
-        HotloadPluginResult result = Transference.TryLoadPluginForTesting(assemblyPath);
+        Assembly assembly = Transference.ResolveHotloadAssemblyForTesting(
+            assemblyPath,
+            out bool reusedLoadedAssembly);
 
-        Assert.Equal(HotloadPluginStatus.AssemblyAlreadyLoaded, result.Status);
-        Assert.False(result.Success);
-        Assert.Contains(typeof(Transference).Assembly.GetName().Name!, result.Message);
+        Assert.Same(typeof(Transference).Assembly, assembly);
+        Assert.True(reusedLoadedAssembly);
     }
 
     /// <summary>

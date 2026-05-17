@@ -19,7 +19,6 @@ internal enum HotloadPluginStatus
 {
     Loaded,
     FileMissing,
-    AssemblyAlreadyLoaded,
     PluginTypeMissing,
     PluginCreateFailed,
     PluginGuidAlreadyLoaded,
@@ -329,6 +328,7 @@ internal static class Transference
     static readonly TransferWorkQueue transferWorkQueue = new();
     static readonly Dictionary<ReleaseAssetCacheKey, ReleaseAssetCacheEntry> releaseAssetDigestCache = [];
     static readonly object releaseAssetDigestCacheLock = new();
+    static readonly HashSet<string> _hotloadedPluginGuids = new(StringComparer.Ordinal);
     const string CLIENT_TAG = "client";
     const string EMBERGLASS_PLUGIN_NAME = "Emberglass";
     const string STAGED_ASSET_DOUBLE_DELIMITER = "__";
@@ -337,6 +337,10 @@ internal static class Transference
     const int DEFAULT_TRANSFER_WORK_BUDGET_MS = 2;
     const int RELEASE_DIGEST_CACHE_TTL_MINUTES = 15;
     const int TRANSFER_WORK_QUEUE_LOG_INTERVAL_SECONDS = 5;
+    delegate bool TryGetShareMetadataDelegate(
+        string metadataKey,
+        out PluginShareMetadataStore.PluginShareMetadata metadata,
+        out string errorMessage);
     /// <summary>
     /// Gets or sets the per-frame time budget, in milliseconds, for processing transfer work items.
     /// </summary>
@@ -1684,20 +1688,10 @@ internal static class Transference
                 $"Failed to read plugin assembly identity from {filePath}: {ex.Message}");
         }
 
-        Assembly loadedAssembly = FindLoadedAssembly(assemblyName, filePath);
-        if (loadedAssembly is not null)
-        {
-            return new(
-                false,
-                HotloadPluginStatus.AssemblyAlreadyLoaded,
-                $"Assembly {assemblyName.Name} is already loaded.",
-                AssemblyName: loadedAssembly.GetName().Name);
-        }
-
         Assembly assembly;
         try
         {
-            assembly = Assembly.LoadFrom(filePath);
+            assembly = ResolveHotloadAssembly(filePath, assemblyName, out _);
         }
         catch (Exception ex)
         {
@@ -1764,6 +1758,7 @@ internal static class Transference
         {
             plugin.Load();
             Hotloader.ReflectAndInitialize(assembly);
+            _hotloadedPluginGuids.Add(metadata.GUID);
         }
         catch (Exception ex)
         {
@@ -1785,6 +1780,22 @@ internal static class Transference
             metadata.Name,
             metadata.Version.ToString(),
             assembly.GetName().Name);
+    }
+
+    static Assembly ResolveHotloadAssembly(
+        string filePath,
+        AssemblyName assemblyName,
+        out bool reusedLoadedAssembly)
+    {
+        Assembly loadedAssembly = FindLoadedAssembly(assemblyName, filePath);
+        if (loadedAssembly is not null)
+        {
+            reusedLoadedAssembly = true;
+            return loadedAssembly;
+        }
+
+        reusedLoadedAssembly = false;
+        return Assembly.LoadFrom(filePath);
     }
 
     static Assembly FindLoadedAssembly(AssemblyName assemblyName, string filePath)
@@ -1823,6 +1834,11 @@ internal static class Transference
 
     static bool IsPluginGuidLoaded(string pluginGuid, Assembly exceptAssembly = null)
     {
+        if (_hotloadedPluginGuids.Contains(pluginGuid))
+        {
+            return true;
+        }
+
         foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
         {
             if (assembly == exceptAssembly)
@@ -1882,6 +1898,12 @@ internal static class Transference
 
     internal static HotloadPluginResult TryLoadPluginForTesting(string filePath)
         => TryLoadPlugin(filePath);
+
+    internal static Assembly ResolveHotloadAssemblyForTesting(string filePath, out bool reusedLoadedAssembly)
+    {
+        AssemblyName assemblyName = AssemblyName.GetAssemblyName(filePath);
+        return ResolveHotloadAssembly(filePath, assemblyName, out reusedLoadedAssembly);
+    }
 
     internal static bool IsPluginGuidLoadedForTesting(string pluginGuid)
         => IsPluginGuidLoaded(pluginGuid);
@@ -3946,11 +3968,23 @@ internal static class Transference
         SharedModEntry entry,
         out PluginShareMetadataStore.PluginShareMetadata metadata,
         out string skipReason)
+        => TrySelectClientShareMetadata(
+            GetShareMetadataKeys(entry),
+            _shareMetadataStore.TryGetPluginMetadata,
+            out metadata,
+            out skipReason);
+
+    static bool TrySelectClientShareMetadata(
+        IReadOnlyList<string> metadataKeys,
+        TryGetShareMetadataDelegate tryGetMetadata,
+        out PluginShareMetadataStore.PluginShareMetadata metadata,
+        out string skipReason)
     {
         var errors = new List<string>();
-        foreach (string metadataKey in GetShareMetadataKeys(entry))
+        var unsafeKeys = new List<string>();
+        foreach (string metadataKey in metadataKeys)
         {
-            if (_shareMetadataStore.TryGetPluginMetadata(metadataKey, out metadata, out string errorMessage))
+            if (tryGetMetadata(metadataKey, out metadata, out string errorMessage))
             {
                 if (IsClientShareAllowed(metadata))
                 {
@@ -3958,15 +3992,25 @@ internal static class Transference
                     return true;
                 }
 
-                skipReason = "Missing required client tag or ClientSafe flag in share metadata.";
-                return false;
+                unsafeKeys.Add(metadataKey);
+                continue;
             }
 
             errors.Add(errorMessage);
         }
 
         metadata = default;
-        skipReason = string.Join(" ", errors);
+        if (unsafeKeys.Count > 0)
+        {
+            skipReason =
+                "Missing required client tag or ClientSafe flag in share metadata for " +
+                string.Join(", ", unsafeKeys) + ".";
+        }
+        else
+        {
+            skipReason = string.Join(" ", errors);
+        }
+
         return false;
     }
 
@@ -3997,6 +4041,27 @@ internal static class Transference
 
         return GetShareMetadataKeys(baseName, metadataBaseName);
     }
+
+    internal static bool TrySelectClientShareMetadataForTesting(
+        IReadOnlyList<string> metadataKeys,
+        IReadOnlyDictionary<string, PluginShareMetadataStore.PluginShareMetadata> entries,
+        out PluginShareMetadataStore.PluginShareMetadata metadata,
+        out string skipReason)
+        => TrySelectClientShareMetadata(
+            metadataKeys,
+            (string metadataKey, out PluginShareMetadataStore.PluginShareMetadata entry, out string errorMessage) =>
+            {
+                if (entries.TryGetValue(metadataKey, out entry))
+                {
+                    errorMessage = string.Empty;
+                    return true;
+                }
+
+                errorMessage = $"Share metadata was not found for '{metadataKey}'.";
+                return false;
+            },
+            out metadata,
+            out skipReason);
 
     /// <summary>
     /// Gets ordered metadata lookup keys from staged and human-legible names.
