@@ -1,0 +1,71 @@
+using System.Reflection;
+using BepInEx;
+using Emberglass.Network;
+using Xunit;
+
+namespace Emberglass.Tests.Network;
+
+/// <summary>
+/// Covers the defensive result surface for runtime plugin hotloading.
+/// </summary>
+public sealed class HotloadPluginResultTests
+{
+    /// <summary>
+    /// Ensures hotloading can reuse an already loaded candidate assembly for retry attempts.
+    /// </summary>
+    [Fact]
+    public void HotloadPluginResult_ReusesAlreadyLoadedCandidateAssembly()
+    {
+        string assemblyPath = typeof(Transference).Assembly.Location;
+
+        Assembly assembly = Transference.ResolveHotloadAssemblyForTesting(
+            assemblyPath,
+            out bool reusedLoadedAssembly);
+
+        Assert.Same(typeof(Transference).Assembly, assembly);
+        Assert.True(reusedLoadedAssembly);
+    }
+
+    /// <summary>
+    /// Ensures a rebuilt DLL at the same path is not matched to stale in-memory code by location only.
+    /// </summary>
+    [Fact]
+    public void HotloadPluginResult_DoesNotReuseLoadedAssemblyWhenIdentityDiffers()
+    {
+        string assemblyPath = typeof(Transference).Assembly.Location;
+        var rebuiltAssemblyName = new AssemblyName("Emberglass.Rebuilt")
+        {
+            Version = new Version(9, 9, 9, 9)
+        };
+
+        Assembly? assembly = Transference.FindLoadedAssemblyForTesting(rebuiltAssemblyName, assemblyPath);
+
+        Assert.Null(assembly);
+    }
+
+    /// <summary>
+    /// Ensures duplicate plugin GUID detection can see the currently loaded Emberglass plugin.
+    /// </summary>
+    [Fact]
+    public void HotloadPluginResult_DetectsLoadedPluginGuid()
+    {
+        BepInPlugin metadata = typeof(Plugin).GetCustomAttribute<BepInPlugin>()!;
+
+        Assert.True(Transference.IsPluginGuidLoadedForTesting(metadata.GUID));
+    }
+
+    /// <summary>
+    /// Ensures a reused startup-loaded assembly is still rejected as a duplicate plugin.
+    /// </summary>
+    [Fact]
+    public void HotloadPluginResult_RejectsDuplicateGuidFromReusedAssembly()
+    {
+        string assemblyPath = typeof(Plugin).Assembly.Location;
+
+        HotloadPluginResult result = Transference.TryLoadPluginForTesting(assemblyPath);
+
+        Assert.False(result.Success);
+        Assert.Equal(HotloadPluginStatus.PluginGuidAlreadyLoaded, result.Status);
+        Assert.Equal(MyPluginInfo.PLUGIN_GUID, result.PluginGuid);
+    }
+}

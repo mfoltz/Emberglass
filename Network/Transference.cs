@@ -15,6 +15,25 @@ using static Emberglass.API.Shared.VEvents;
 using static Emberglass.Network.Registry;
 
 namespace Emberglass.Network;
+internal enum HotloadPluginStatus
+{
+    Loaded,
+    FileMissing,
+    PluginTypeMissing,
+    PluginCreateFailed,
+    PluginGuidAlreadyLoaded,
+    Failed
+}
+
+internal readonly record struct HotloadPluginResult(
+    bool Success,
+    HotloadPluginStatus Status,
+    string Message,
+    string PluginGuid = null,
+    string PluginName = null,
+    string PluginVersion = null,
+    string AssemblyName = null);
+
 internal static class Transference
 {
     public unsafe struct TransferRequest
@@ -309,6 +328,7 @@ internal static class Transference
     static readonly TransferWorkQueue transferWorkQueue = new();
     static readonly Dictionary<ReleaseAssetCacheKey, ReleaseAssetCacheEntry> releaseAssetDigestCache = [];
     static readonly object releaseAssetDigestCacheLock = new();
+    static readonly HashSet<string> _hotloadedPluginGuids = new(StringComparer.Ordinal);
     const string CLIENT_TAG = "client";
     const string EMBERGLASS_PLUGIN_NAME = "Emberglass";
     const string STAGED_ASSET_DOUBLE_DELIMITER = "__";
@@ -317,6 +337,10 @@ internal static class Transference
     const int DEFAULT_TRANSFER_WORK_BUDGET_MS = 2;
     const int RELEASE_DIGEST_CACHE_TTL_MINUTES = 15;
     const int TRANSFER_WORK_QUEUE_LOG_INTERVAL_SECONDS = 5;
+    delegate bool TryGetShareMetadataDelegate(
+        string metadataKey,
+        out PluginShareMetadataStore.PluginShareMetadata metadata,
+        out string errorMessage);
     /// <summary>
     /// Gets or sets the per-frame time budget, in milliseconds, for processing transfer work items.
     /// </summary>
@@ -712,7 +736,7 @@ internal static class Transference
                         if (hotload)
                         {
                             VWorld.Log.LogWarning("Loading plugin...");
-                            LoadPlugin(filePath);
+                            LogHotloadPluginResult(filePath, LoadPlugin(filePath));
                         }
                     }
 
@@ -1106,7 +1130,7 @@ internal static class Transference
             if (complete.Hotload)
             {
                 VWorld.Log.LogWarning("Loading plugin...");
-                LoadPlugin(filePath);
+                LogHotloadPluginResult(filePath, LoadPlugin(filePath));
             }
         }
         catch (Exception ex)
@@ -1638,19 +1662,236 @@ internal static class Transference
 
         EnqueueTransferWorkItem(new TransferHashWorkItem(transferId, payload, onComplete));
     }
-    static void LoadPlugin(string filePath)
+    static HotloadPluginResult LoadPlugin(string filePath)
+        => TryLoadPlugin(filePath);
+
+    static HotloadPluginResult TryLoadPlugin(string filePath)
     {
-        Assembly assembly = Assembly.LoadFrom(filePath);
-        Type type = assembly
-            .GetTypes()
-            .First(t => typeof(BasePlugin).IsAssignableFrom(t) && !t.IsAbstract) ?? throw new InvalidOperationException("Failed to get BasePlugin type...");
+        if (!File.Exists(filePath))
+        {
+            return new(
+                false,
+                HotloadPluginStatus.FileMissing,
+                $"Plugin file does not exist: {filePath}");
+        }
 
-        var plugin = (BasePlugin)Activator.CreateInstance(type) ?? throw new InvalidOperationException("Failed to create BasePlugin instance...");
-        BepInPlugin metadata = MetadataHelper.GetMetadata(plugin);
+        AssemblyName assemblyName;
+        try
+        {
+            assemblyName = AssemblyName.GetAssemblyName(filePath);
+        }
+        catch (Exception ex)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.Failed,
+                $"Failed to read plugin assembly identity from {filePath}: {ex.Message}");
+        }
 
-        plugin.Load();
-        Hotloader.ReflectAndInitialize(assembly);
+        Assembly assembly;
+        bool reusedLoadedAssembly;
+        try
+        {
+            assembly = ResolveHotloadAssembly(filePath, assemblyName, out reusedLoadedAssembly);
+        }
+        catch (Exception ex)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.Failed,
+                $"Failed to load plugin assembly from {filePath}: {ex.Message}",
+                AssemblyName: assemblyName.Name);
+        }
+
+        Type type = GetLoadableTypes(assembly)
+            .FirstOrDefault(t => typeof(BasePlugin).IsAssignableFrom(t) && !t.IsAbstract);
+        if (type is null)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.PluginTypeMissing,
+                $"Assembly {assemblyName.Name} does not contain a concrete BasePlugin type.",
+                AssemblyName: assembly.GetName().Name);
+        }
+
+        BepInPlugin metadata = type.GetCustomAttribute<BepInPlugin>();
+        if (metadata is null)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.Failed,
+                $"Failed to read BepInEx metadata for {type.FullName}.",
+                AssemblyName: assembly.GetName().Name);
+        }
+
+        if (IsPluginGuidLoaded(metadata.GUID, reusedLoadedAssembly ? null : assembly))
+        {
+            return new(
+                false,
+                HotloadPluginStatus.PluginGuidAlreadyLoaded,
+                $"Plugin GUID {metadata.GUID} is already loaded.",
+                metadata.GUID,
+                metadata.Name,
+                metadata.Version.ToString(),
+                assembly.GetName().Name);
+        }
+
+        BasePlugin plugin;
+        try
+        {
+            plugin = (BasePlugin)Activator.CreateInstance(type)
+                ?? throw new InvalidOperationException("Activator returned null.");
+        }
+        catch (Exception ex)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.PluginCreateFailed,
+                $"Failed to create plugin instance for {type.FullName}: {ex.Message}",
+                AssemblyName: assembly.GetName().Name);
+        }
+
+        try
+        {
+            plugin.Load();
+            Hotloader.ReflectAndInitialize(assembly);
+            _hotloadedPluginGuids.Add(metadata.GUID);
+        }
+        catch (Exception ex)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.Failed,
+                $"Plugin {metadata.Name} failed during Load/Initialize: {ex}",
+                metadata.GUID,
+                metadata.Name,
+                metadata.Version.ToString(),
+                assembly.GetName().Name);
+        }
+
+        return new(
+            true,
+            HotloadPluginStatus.Loaded,
+            $"Plugin {metadata.Name} {metadata.Version} loaded.",
+            metadata.GUID,
+            metadata.Name,
+            metadata.Version.ToString(),
+            assembly.GetName().Name);
     }
+
+    static Assembly ResolveHotloadAssembly(
+        string filePath,
+        AssemblyName assemblyName,
+        out bool reusedLoadedAssembly)
+    {
+        Assembly loadedAssembly = FindLoadedAssembly(assemblyName, filePath);
+        if (loadedAssembly is not null)
+        {
+            reusedLoadedAssembly = true;
+            return loadedAssembly;
+        }
+
+        reusedLoadedAssembly = false;
+        return Assembly.LoadFrom(filePath);
+    }
+
+    static Assembly FindLoadedAssembly(AssemblyName assemblyName, string filePath)
+    {
+        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (assembly.IsDynamic)
+            {
+                continue;
+            }
+
+            if (string.Equals(assembly.GetName().FullName, assemblyName.FullName, StringComparison.Ordinal))
+            {
+                return assembly;
+            }
+        }
+
+        return null;
+    }
+
+    static bool IsPluginGuidLoaded(string pluginGuid, Assembly exceptAssembly = null)
+    {
+        if (_hotloadedPluginGuids.Contains(pluginGuid))
+        {
+            return true;
+        }
+
+        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (assembly == exceptAssembly)
+            {
+                continue;
+            }
+
+            foreach (Type type in GetLoadableTypes(assembly))
+            {
+                if (!typeof(BasePlugin).IsAssignableFrom(type) || type.IsAbstract)
+                {
+                    continue;
+                }
+
+                BepInPlugin metadata = type.GetCustomAttribute<BepInPlugin>();
+                if (metadata is not null
+                    && string.Equals(metadata.GUID, pluginGuid, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types.Where(type => type is not null).Select(type => type!);
+        }
+        catch
+        {
+            return Array.Empty<Type>();
+        }
+    }
+
+    static void LogHotloadPluginResult(string filePath, HotloadPluginResult result)
+    {
+        string fileName = Path.GetFileName(filePath);
+        if (result.Success)
+        {
+            VWorld.Log?.LogInfo(
+                $"[Hotload] Loaded {result.PluginName} {result.PluginVersion} " +
+                $"({result.PluginGuid}) from {fileName}.");
+            return;
+        }
+
+        VWorld.Log?.LogError(
+            $"[Hotload] Failed to load {fileName}: {result.Status} - {result.Message}");
+    }
+
+    internal static HotloadPluginResult TryLoadPluginForTesting(string filePath)
+        => TryLoadPlugin(filePath);
+
+    internal static Assembly ResolveHotloadAssemblyForTesting(string filePath, out bool reusedLoadedAssembly)
+    {
+        AssemblyName assemblyName = AssemblyName.GetAssemblyName(filePath);
+        return ResolveHotloadAssembly(filePath, assemblyName, out reusedLoadedAssembly);
+    }
+
+    internal static Assembly FindLoadedAssemblyForTesting(AssemblyName assemblyName, string filePath)
+        => FindLoadedAssembly(assemblyName, filePath);
+
+    internal static bool IsPluginGuidLoadedForTesting(string pluginGuid)
+        => IsPluginGuidLoaded(pluginGuid);
+
     public static IEnumerator CompressChunkRoutine(
         byte[] bytes,
         Action<byte[]> onComplete)
@@ -2970,10 +3211,11 @@ internal static class Transference
         public HashSet<string> Hashes { get; } = hashes;
     }
 
-    readonly struct SharedModEntry(string fileName, string baseName, string sha256, bool isZip)
+    readonly struct SharedModEntry(string fileName, string baseName, string metadataBaseName, string sha256, bool isZip)
     {
         public string FileName { get; } = fileName;
         public string BaseName { get; } = baseName;
+        public string MetadataBaseName { get; } = metadataBaseName;
         public string Sha256 { get; } = sha256;
         public bool IsZip { get; } = isZip;
     }
@@ -3524,7 +3766,7 @@ internal static class Transference
                 continue;
             }
 
-            entries.Add(new SharedModEntry(fileName, baseName, digest, isZip));
+            entries.Add(new SharedModEntry(fileName, baseName, identity.Repo, digest, isZip));
         }
 
         return entries;
@@ -3710,21 +3952,131 @@ internal static class Transference
         SharedModEntry entry,
         out PluginShareMetadataStore.PluginShareMetadata metadata,
         out string skipReason)
+        => TrySelectClientShareMetadata(
+            GetShareMetadataKeys(entry),
+            _shareMetadataStore.TryGetPluginMetadata,
+            out metadata,
+            out skipReason);
+
+    static bool TrySelectClientShareMetadata(
+        IReadOnlyList<string> metadataKeys,
+        TryGetShareMetadataDelegate tryGetMetadata,
+        out PluginShareMetadataStore.PluginShareMetadata metadata,
+        out string skipReason)
     {
-        if (!_shareMetadataStore.TryGetPluginMetadata(entry.BaseName, out metadata, out string errorMessage))
+        var errors = new List<string>();
+        var unsafeKeys = new List<string>();
+        foreach (string metadataKey in metadataKeys)
         {
-            skipReason = errorMessage;
-            return false;
+            if (tryGetMetadata(metadataKey, out metadata, out string errorMessage))
+            {
+                if (IsClientShareAllowed(metadata))
+                {
+                    skipReason = string.Empty;
+                    return true;
+                }
+
+                unsafeKeys.Add(metadataKey);
+                continue;
+            }
+
+            errors.Add(errorMessage);
         }
 
-        if (IsClientShareAllowed(metadata))
+        metadata = default;
+        if (unsafeKeys.Count > 0)
         {
-            skipReason = string.Empty;
-            return true;
+            skipReason =
+                "Missing required client tag or ClientSafe flag in share metadata for " +
+                string.Join(", ", unsafeKeys) + ".";
+        }
+        else
+        {
+            skipReason = string.Join(" ", errors);
         }
 
-        skipReason = "Missing required client tag or ClientSafe flag in share metadata.";
         return false;
+    }
+
+    /// <summary>
+    /// Gets metadata lookup keys for a shared mod entry.
+    /// </summary>
+    /// <param name="entry">The shared mod entry.</param>
+    /// <returns>The ordered metadata keys to try.</returns>
+    static IReadOnlyList<string> GetShareMetadataKeys(SharedModEntry entry)
+        => GetShareMetadataKeys(entry.BaseName, entry.MetadataBaseName);
+
+    /// <summary>
+    /// Gets metadata lookup keys for a staged asset file.
+    /// </summary>
+    /// <param name="stagedFileName">The staged asset file name.</param>
+    /// <returns>The ordered metadata keys to try.</returns>
+    internal static IReadOnlyList<string> GetShareMetadataKeysForTesting(string stagedFileName)
+    {
+        string baseName = Path.GetFileNameWithoutExtension(stagedFileName);
+        string metadataBaseName = string.Empty;
+        if (TryResolveGitHubReleaseIdentityFromStagedFileName(
+                stagedFileName,
+                out GitHubReleaseClient.GitHubReleaseIdentity identity,
+                out _))
+        {
+            metadataBaseName = identity.Repo;
+        }
+
+        return GetShareMetadataKeys(baseName, metadataBaseName);
+    }
+
+    internal static bool TrySelectClientShareMetadataForTesting(
+        IReadOnlyList<string> metadataKeys,
+        IReadOnlyDictionary<string, PluginShareMetadataStore.PluginShareMetadata> entries,
+        out PluginShareMetadataStore.PluginShareMetadata metadata,
+        out string skipReason)
+        => TrySelectClientShareMetadata(
+            metadataKeys,
+            (string metadataKey, out PluginShareMetadataStore.PluginShareMetadata entry, out string errorMessage) =>
+            {
+                if (entries.TryGetValue(metadataKey, out entry))
+                {
+                    errorMessage = string.Empty;
+                    return true;
+                }
+
+                errorMessage = $"Share metadata was not found for '{metadataKey}'.";
+                return false;
+            },
+            out metadata,
+            out skipReason);
+
+    /// <summary>
+    /// Gets ordered metadata lookup keys from staged and human-legible names.
+    /// </summary>
+    /// <param name="baseName">The staged asset base name.</param>
+    /// <param name="metadataBaseName">The preferred metadata base name.</param>
+    /// <returns>The ordered metadata keys to try.</returns>
+    static IReadOnlyList<string> GetShareMetadataKeys(string baseName, string metadataBaseName)
+    {
+        var keys = new List<string>(capacity: 2);
+        AddMetadataKey(keys, baseName);
+        AddMetadataKey(keys, metadataBaseName);
+        return keys;
+    }
+
+    /// <summary>
+    /// Adds a unique metadata key to a lookup list.
+    /// </summary>
+    /// <param name="keys">The key list to update.</param>
+    /// <param name="key">The key candidate.</param>
+    static void AddMetadataKey(List<string> keys, string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        if (!keys.Contains(key, StringComparer.OrdinalIgnoreCase))
+        {
+            keys.Add(key);
+        }
     }
 
     /// <summary>
