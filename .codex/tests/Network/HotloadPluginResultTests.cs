@@ -53,4 +53,19 @@ public sealed class HotloadPluginResultTests
 
         Assert.True(Transference.IsPluginGuidLoadedForTesting(metadata.GUID));
     }
+
+    /// <summary>
+    /// Ensures a reused startup-loaded assembly is still rejected as a duplicate plugin.
+    /// </summary>
+    [Fact]
+    public void HotloadPluginResult_RejectsDuplicateGuidFromReusedAssembly()
+    {
+        string assemblyPath = typeof(Plugin).Assembly.Location;
+
+        HotloadPluginResult result = Transference.TryLoadPluginForTesting(assemblyPath);
+
+        Assert.False(result.Success);
+        Assert.Equal(HotloadPluginStatus.PluginGuidAlreadyLoaded, result.Status);
+        Assert.Equal(MyPluginInfo.PLUGIN_GUID, result.PluginGuid);
+    }
 }

@@ -1689,9 +1689,10 @@ internal static class Transference
         }
 
         Assembly assembly;
+        bool reusedLoadedAssembly;
         try
         {
-            assembly = ResolveHotloadAssembly(filePath, assemblyName, out _);
+            assembly = ResolveHotloadAssembly(filePath, assemblyName, out reusedLoadedAssembly);
         }
         catch (Exception ex)
         {
@@ -1713,6 +1714,28 @@ internal static class Transference
                 AssemblyName: assembly.GetName().Name);
         }
 
+        BepInPlugin metadata = type.GetCustomAttribute<BepInPlugin>();
+        if (metadata is null)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.Failed,
+                $"Failed to read BepInEx metadata for {type.FullName}.",
+                AssemblyName: assembly.GetName().Name);
+        }
+
+        if (IsPluginGuidLoaded(metadata.GUID, reusedLoadedAssembly ? null : assembly))
+        {
+            return new(
+                false,
+                HotloadPluginStatus.PluginGuidAlreadyLoaded,
+                $"Plugin GUID {metadata.GUID} is already loaded.",
+                metadata.GUID,
+                metadata.Name,
+                metadata.Version.ToString(),
+                assembly.GetName().Name);
+        }
+
         BasePlugin plugin;
         try
         {
@@ -1726,32 +1749,6 @@ internal static class Transference
                 HotloadPluginStatus.PluginCreateFailed,
                 $"Failed to create plugin instance for {type.FullName}: {ex.Message}",
                 AssemblyName: assembly.GetName().Name);
-        }
-
-        BepInPlugin metadata;
-        try
-        {
-            metadata = MetadataHelper.GetMetadata(plugin);
-        }
-        catch (Exception ex)
-        {
-            return new(
-                false,
-                HotloadPluginStatus.Failed,
-                $"Failed to read BepInEx metadata for {type.FullName}: {ex.Message}",
-                AssemblyName: assembly.GetName().Name);
-        }
-
-        if (IsPluginGuidLoaded(metadata.GUID, assembly))
-        {
-            return new(
-                false,
-                HotloadPluginStatus.PluginGuidAlreadyLoaded,
-                $"Plugin GUID {metadata.GUID} is already loaded.",
-                metadata.GUID,
-                metadata.Name,
-                metadata.Version.ToString(),
-                assembly.GetName().Name);
         }
 
         try
