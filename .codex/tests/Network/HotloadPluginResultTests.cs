@@ -27,6 +27,23 @@ public sealed class HotloadPluginResultTests
     }
 
     /// <summary>
+    /// Ensures a rebuilt DLL at the same path is not matched to stale in-memory code by location only.
+    /// </summary>
+    [Fact]
+    public void HotloadPluginResult_DoesNotReuseLoadedAssemblyWhenIdentityDiffers()
+    {
+        string assemblyPath = typeof(Transference).Assembly.Location;
+        var rebuiltAssemblyName = new AssemblyName("Emberglass.Rebuilt")
+        {
+            Version = new Version(9, 9, 9, 9)
+        };
+
+        Assembly? assembly = Transference.FindLoadedAssemblyForTesting(rebuiltAssemblyName, assemblyPath);
+
+        Assert.Null(assembly);
+    }
+
+    /// <summary>
     /// Ensures duplicate plugin GUID detection can see the currently loaded Emberglass plugin.
     /// </summary>
     [Fact]

@@ -1800,7 +1800,6 @@ internal static class Transference
 
     static Assembly FindLoadedAssembly(AssemblyName assemblyName, string filePath)
     {
-        string fullPath = Path.GetFullPath(filePath);
         foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
         {
             if (assembly.IsDynamic)
@@ -1809,21 +1808,6 @@ internal static class Transference
             }
 
             if (string.Equals(assembly.GetName().FullName, assemblyName.FullName, StringComparison.Ordinal))
-            {
-                return assembly;
-            }
-
-            string location;
-            try
-            {
-                location = assembly.Location;
-            }
-            catch (NotSupportedException)
-            {
-                continue;
-            }
-
-            if (string.Equals(Path.GetFullPath(location), fullPath, StringComparison.OrdinalIgnoreCase))
             {
                 return assembly;
             }
@@ -1904,6 +1888,9 @@ internal static class Transference
         AssemblyName assemblyName = AssemblyName.GetAssemblyName(filePath);
         return ResolveHotloadAssembly(filePath, assemblyName, out reusedLoadedAssembly);
     }
+
+    internal static Assembly FindLoadedAssemblyForTesting(AssemblyName assemblyName, string filePath)
+        => FindLoadedAssembly(assemblyName, filePath);
 
     internal static bool IsPluginGuidLoadedForTesting(string pluginGuid)
         => IsPluginGuidLoaded(pluginGuid);
