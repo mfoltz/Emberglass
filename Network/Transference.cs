@@ -15,6 +15,26 @@ using static Emberglass.API.Shared.VEvents;
 using static Emberglass.Network.Registry;
 
 namespace Emberglass.Network;
+internal enum HotloadPluginStatus
+{
+    Loaded,
+    FileMissing,
+    AssemblyAlreadyLoaded,
+    PluginTypeMissing,
+    PluginCreateFailed,
+    PluginGuidAlreadyLoaded,
+    Failed
+}
+
+internal readonly record struct HotloadPluginResult(
+    bool Success,
+    HotloadPluginStatus Status,
+    string Message,
+    string PluginGuid = null,
+    string PluginName = null,
+    string PluginVersion = null,
+    string AssemblyName = null);
+
 internal static class Transference
 {
     public unsafe struct TransferRequest
@@ -712,7 +732,7 @@ internal static class Transference
                         if (hotload)
                         {
                             VWorld.Log.LogWarning("Loading plugin...");
-                            LoadPlugin(filePath);
+                            LogHotloadPluginResult(filePath, LoadPlugin(filePath));
                         }
                     }
 
@@ -1106,7 +1126,7 @@ internal static class Transference
             if (complete.Hotload)
             {
                 VWorld.Log.LogWarning("Loading plugin...");
-                LoadPlugin(filePath);
+                LogHotloadPluginResult(filePath, LoadPlugin(filePath));
             }
         }
         catch (Exception ex)
@@ -1638,19 +1658,234 @@ internal static class Transference
 
         EnqueueTransferWorkItem(new TransferHashWorkItem(transferId, payload, onComplete));
     }
-    static void LoadPlugin(string filePath)
+    static HotloadPluginResult LoadPlugin(string filePath)
+        => TryLoadPlugin(filePath);
+
+    static HotloadPluginResult TryLoadPlugin(string filePath)
     {
-        Assembly assembly = Assembly.LoadFrom(filePath);
-        Type type = assembly
-            .GetTypes()
-            .First(t => typeof(BasePlugin).IsAssignableFrom(t) && !t.IsAbstract) ?? throw new InvalidOperationException("Failed to get BasePlugin type...");
+        if (!File.Exists(filePath))
+        {
+            return new(
+                false,
+                HotloadPluginStatus.FileMissing,
+                $"Plugin file does not exist: {filePath}");
+        }
 
-        var plugin = (BasePlugin)Activator.CreateInstance(type) ?? throw new InvalidOperationException("Failed to create BasePlugin instance...");
-        BepInPlugin metadata = MetadataHelper.GetMetadata(plugin);
+        AssemblyName assemblyName;
+        try
+        {
+            assemblyName = AssemblyName.GetAssemblyName(filePath);
+        }
+        catch (Exception ex)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.Failed,
+                $"Failed to read plugin assembly identity from {filePath}: {ex.Message}");
+        }
 
-        plugin.Load();
-        Hotloader.ReflectAndInitialize(assembly);
+        Assembly loadedAssembly = FindLoadedAssembly(assemblyName, filePath);
+        if (loadedAssembly is not null)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.AssemblyAlreadyLoaded,
+                $"Assembly {assemblyName.Name} is already loaded.",
+                AssemblyName: loadedAssembly.GetName().Name);
+        }
+
+        Assembly assembly;
+        try
+        {
+            assembly = Assembly.LoadFrom(filePath);
+        }
+        catch (Exception ex)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.Failed,
+                $"Failed to load plugin assembly from {filePath}: {ex.Message}",
+                AssemblyName: assemblyName.Name);
+        }
+
+        Type type = GetLoadableTypes(assembly)
+            .FirstOrDefault(t => typeof(BasePlugin).IsAssignableFrom(t) && !t.IsAbstract);
+        if (type is null)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.PluginTypeMissing,
+                $"Assembly {assemblyName.Name} does not contain a concrete BasePlugin type.",
+                AssemblyName: assembly.GetName().Name);
+        }
+
+        BasePlugin plugin;
+        try
+        {
+            plugin = (BasePlugin)Activator.CreateInstance(type)
+                ?? throw new InvalidOperationException("Activator returned null.");
+        }
+        catch (Exception ex)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.PluginCreateFailed,
+                $"Failed to create plugin instance for {type.FullName}: {ex.Message}",
+                AssemblyName: assembly.GetName().Name);
+        }
+
+        BepInPlugin metadata;
+        try
+        {
+            metadata = MetadataHelper.GetMetadata(plugin);
+        }
+        catch (Exception ex)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.Failed,
+                $"Failed to read BepInEx metadata for {type.FullName}: {ex.Message}",
+                AssemblyName: assembly.GetName().Name);
+        }
+
+        if (IsPluginGuidLoaded(metadata.GUID, assembly))
+        {
+            return new(
+                false,
+                HotloadPluginStatus.PluginGuidAlreadyLoaded,
+                $"Plugin GUID {metadata.GUID} is already loaded.",
+                metadata.GUID,
+                metadata.Name,
+                metadata.Version.ToString(),
+                assembly.GetName().Name);
+        }
+
+        try
+        {
+            plugin.Load();
+            Hotloader.ReflectAndInitialize(assembly);
+        }
+        catch (Exception ex)
+        {
+            return new(
+                false,
+                HotloadPluginStatus.Failed,
+                $"Plugin {metadata.Name} failed during Load/Initialize: {ex}",
+                metadata.GUID,
+                metadata.Name,
+                metadata.Version.ToString(),
+                assembly.GetName().Name);
+        }
+
+        return new(
+            true,
+            HotloadPluginStatus.Loaded,
+            $"Plugin {metadata.Name} {metadata.Version} loaded.",
+            metadata.GUID,
+            metadata.Name,
+            metadata.Version.ToString(),
+            assembly.GetName().Name);
     }
+
+    static Assembly FindLoadedAssembly(AssemblyName assemblyName, string filePath)
+    {
+        string fullPath = Path.GetFullPath(filePath);
+        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (assembly.IsDynamic)
+            {
+                continue;
+            }
+
+            if (string.Equals(assembly.GetName().FullName, assemblyName.FullName, StringComparison.Ordinal))
+            {
+                return assembly;
+            }
+
+            string location;
+            try
+            {
+                location = assembly.Location;
+            }
+            catch (NotSupportedException)
+            {
+                continue;
+            }
+
+            if (string.Equals(Path.GetFullPath(location), fullPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return assembly;
+            }
+        }
+
+        return null;
+    }
+
+    static bool IsPluginGuidLoaded(string pluginGuid, Assembly exceptAssembly = null)
+    {
+        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (assembly == exceptAssembly)
+            {
+                continue;
+            }
+
+            foreach (Type type in GetLoadableTypes(assembly))
+            {
+                if (!typeof(BasePlugin).IsAssignableFrom(type) || type.IsAbstract)
+                {
+                    continue;
+                }
+
+                BepInPlugin metadata = type.GetCustomAttribute<BepInPlugin>();
+                if (metadata is not null
+                    && string.Equals(metadata.GUID, pluginGuid, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types.Where(type => type is not null).Select(type => type!);
+        }
+        catch
+        {
+            return Array.Empty<Type>();
+        }
+    }
+
+    static void LogHotloadPluginResult(string filePath, HotloadPluginResult result)
+    {
+        string fileName = Path.GetFileName(filePath);
+        if (result.Success)
+        {
+            VWorld.Log?.LogInfo(
+                $"[Hotload] Loaded {result.PluginName} {result.PluginVersion} " +
+                $"({result.PluginGuid}) from {fileName}.");
+            return;
+        }
+
+        VWorld.Log?.LogError(
+            $"[Hotload] Failed to load {fileName}: {result.Status} - {result.Message}");
+    }
+
+    internal static HotloadPluginResult TryLoadPluginForTesting(string filePath)
+        => TryLoadPlugin(filePath);
+
+    internal static bool IsPluginGuidLoadedForTesting(string pluginGuid)
+        => IsPluginGuidLoaded(pluginGuid);
+
     public static IEnumerator CompressChunkRoutine(
         byte[] bytes,
         Action<byte[]> onComplete)
