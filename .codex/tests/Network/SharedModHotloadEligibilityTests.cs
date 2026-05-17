@@ -12,7 +12,7 @@ public sealed class SharedModHotloadEligibilityTests
     /// Ensures hotload requires a distinct opt-in beyond client sharing eligibility.
     /// </summary>
     [Fact]
-    public void SharedModHotloadEligibility_RequiresClientSafeAndHotloadAllowed()
+    public void SharedModHotloadEligibility_RequiresDllClientSafeAndHotloadAllowed()
     {
         PluginShareMetadataStore.PluginShareMetadata eligible = new(
             "mfoltz/Eclipse",
@@ -33,8 +33,9 @@ public sealed class SharedModHotloadEligibilityTests
             HotloadAllowed = true
         };
 
-        Assert.True(Transference.IsSharedModHotloadAllowedForTesting(eligible));
-        Assert.False(Transference.IsSharedModHotloadAllowedForTesting(downloadOnly));
-        Assert.False(Transference.IsSharedModHotloadAllowedForTesting(unsafeHotload));
+        Assert.True(Transference.IsSharedModHotloadAllowedForTesting(isZip: false, eligible));
+        Assert.False(Transference.IsSharedModHotloadAllowedForTesting(isZip: true, eligible));
+        Assert.False(Transference.IsSharedModHotloadAllowedForTesting(isZip: false, downloadOnly));
+        Assert.False(Transference.IsSharedModHotloadAllowedForTesting(isZip: false, unsafeHotload));
     }
 }

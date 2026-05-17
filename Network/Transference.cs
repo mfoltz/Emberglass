@@ -566,7 +566,7 @@ internal static class Transference
                 continue;
             }
 
-            bool hotload = IsSharedModHotloadAllowed(metadata);
+            bool hotload = IsSharedModHotloadAllowed(entry.IsZip, metadata);
             SendTransferOffer(user, new TransferRequest(entry.FileName.AsSpan(), clientbound: true, hotload));
         }
     }
@@ -3740,18 +3740,22 @@ internal static class Transference
     /// <summary>
     /// Determines whether a shared mod should be hotloaded after client transfer.
     /// </summary>
+    /// <param name="isZip">Whether the shared mod is a ZIP archive.</param>
     /// <param name="metadata">The share metadata to evaluate.</param>
-    /// <returns><c>true</c> when the mod is client-shareable and explicitly hotload-enabled.</returns>
-    static bool IsSharedModHotloadAllowed(PluginShareMetadataStore.PluginShareMetadata metadata)
-        => metadata.HotloadAllowed && IsClientShareAllowed(metadata);
+    /// <returns><c>true</c> when the DLL is client-shareable and explicitly hotload-enabled.</returns>
+    static bool IsSharedModHotloadAllowed(bool isZip, PluginShareMetadataStore.PluginShareMetadata metadata)
+        => !isZip && metadata.HotloadAllowed && IsClientShareAllowed(metadata);
 
     /// <summary>
     /// Exposes shared-mod hotload eligibility for focused unit coverage.
     /// </summary>
+    /// <param name="isZip">Whether the shared mod is a ZIP archive.</param>
     /// <param name="metadata">The share metadata to evaluate.</param>
     /// <returns><c>true</c> when the mod should be offered for runtime hotload.</returns>
-    internal static bool IsSharedModHotloadAllowedForTesting(PluginShareMetadataStore.PluginShareMetadata metadata)
-        => IsSharedModHotloadAllowed(metadata);
+    internal static bool IsSharedModHotloadAllowedForTesting(
+        bool isZip,
+        PluginShareMetadataStore.PluginShareMetadata metadata)
+        => IsSharedModHotloadAllowed(isZip, metadata);
 
     /// <summary>
     /// Checks whether a tag collection includes the client tag.
