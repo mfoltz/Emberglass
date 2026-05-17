@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.1.6
+
+- Hardened VShare runtime hotload loading with explicit success/failure receipts, already-loaded assembly guards, duplicate plugin GUID detection, and repo-name metadata key fallback.
+
 ## v0.1.5
 
 - Documented the experimental SystemBase foundation posture and the parked resource naming boundary.
