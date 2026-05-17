@@ -40,6 +40,6 @@
     <ItemGroup>
         <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.733" IncludeAssets="compile" />
         <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" />
-        <PackageReference Include="VampireReferenceAssemblies" Version="1.1.11-r96495-b8" />
+        <PackageReference Include="VampireReferenceAssemblies" Version="1.1.12-r99041-b2" />
     </ItemGroup>	
 </Project>

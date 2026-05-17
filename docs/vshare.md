@@ -28,6 +28,29 @@ VShare is opt-in. The server responds to a request with transfer offers for each
 incoming offer(s) and can accept or decline each one. Transfers only proceed after acceptance, and declines are recorded
 so clients stay in control of what gets downloaded.
 
+## Share Metadata
+
+Shared clientbound mods require `BepInEx/config/Emberglass/ShareMetadata.json` metadata. A mod can be offered to clients
+when it is marked with `ClientSafe: true` or includes the `client` tag/category. Runtime loading is a separate opt-in:
+only entries that are also marked `HotloadAllowed: true` are offered with hotload enabled.
+
+Example:
+
+```json
+{
+  "Plugins": {
+    "Eclipse": {
+      "GitHubRepo": "mfoltz/Eclipse",
+      "GitHubTag": "v1.3.14-pre",
+      "ClientSafe": true,
+      "HotloadAllowed": true,
+      "Tags": ["client"],
+      "Categories": []
+    }
+  }
+}
+```
+
 ## Supported File Types and GitHub Release Naming
 
 * Supported file types: `.dll` and `.zip`.

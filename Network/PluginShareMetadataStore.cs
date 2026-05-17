@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace Emberglass.Network;
 
 /// <summary>
-/// Loads and caches metadata that describes shared plugin releases and client-safety flags.
+/// Loads and caches metadata that describes shared plugin releases, client-safety flags, and hotload opt-ins.
 /// </summary>
 internal sealed class PluginShareMetadataStore
 {
@@ -133,6 +133,7 @@ internal sealed class PluginShareMetadataStore
         string GitHubRepo,
         string GitHubTag,
         bool ClientSafe,
+        bool HotloadAllowed,
         IReadOnlyList<string> Tags,
         IReadOnlyList<string> Categories);
 
@@ -146,6 +147,7 @@ internal sealed class PluginShareMetadataStore
         public string GitHubRepo { get; set; } = string.Empty;
         public string GitHubTag { get; set; } = string.Empty;
         public bool ClientSafe { get; set; }
+        public bool HotloadAllowed { get; set; }
         public List<string> Tags { get; set; } = [];
         public List<string> Categories { get; set; } = [];
 
@@ -154,6 +156,7 @@ internal sealed class PluginShareMetadataStore
                 GitHubRepo ?? string.Empty,
                 GitHubTag ?? string.Empty,
                 ClientSafe,
+                HotloadAllowed,
                 Tags ?? [],
                 Categories ?? []);
     }

@@ -551,7 +551,10 @@ internal static class Transference
                 continue;
             }
 
-            if (!IsClientShareAllowed(entry, out string skipReason))
+            if (!TryGetClientShareMetadata(
+                    entry,
+                    out PluginShareMetadataStore.PluginShareMetadata metadata,
+                    out string skipReason))
             {
                 VWorld.Log.LogWarning($"Skipping shared mod {entry.FileName}: {skipReason}");
                 continue;
@@ -563,7 +566,8 @@ internal static class Transference
                 continue;
             }
 
-            SendTransferOffer(user, new TransferRequest(entry.FileName.AsSpan(), clientbound: true, hotload: false));
+            bool hotload = IsSharedModHotloadAllowed(entry.IsZip, metadata);
+            SendTransferOffer(user, new TransferRequest(entry.FileName.AsSpan(), clientbound: true, hotload));
         }
     }
     static IEnumerator TransferRoutine(User target, string fileName, bool clientbound, bool hotload = false, Guid? transferId = null)
@@ -3696,22 +3700,24 @@ internal static class Transference
     }
 
     /// <summary>
-    /// Determines whether a shared mod is eligible for client sharing based on share metadata.
+    /// Resolves client-share metadata for a staged shared mod.
     /// </summary>
     /// <param name="entry">The shared mod entry.</param>
+    /// <param name="metadata">The resolved share metadata.</param>
     /// <param name="skipReason">The reason a mod was rejected for sharing.</param>
     /// <returns><c>true</c> when the mod is client-safe; otherwise <c>false</c>.</returns>
-    static bool IsClientShareAllowed(SharedModEntry entry, out string skipReason)
+    static bool TryGetClientShareMetadata(
+        SharedModEntry entry,
+        out PluginShareMetadataStore.PluginShareMetadata metadata,
+        out string skipReason)
     {
-        if (!_shareMetadataStore.TryGetPluginMetadata(entry.BaseName, out PluginShareMetadataStore.PluginShareMetadata metadata, out string errorMessage))
+        if (!_shareMetadataStore.TryGetPluginMetadata(entry.BaseName, out metadata, out string errorMessage))
         {
             skipReason = errorMessage;
             return false;
         }
 
-        if (metadata.ClientSafe ||
-            ContainsClientTag(metadata.Tags) ||
-            ContainsClientTag(metadata.Categories))
+        if (IsClientShareAllowed(metadata))
         {
             skipReason = string.Empty;
             return true;
@@ -3720,6 +3726,36 @@ internal static class Transference
         skipReason = "Missing required client tag or ClientSafe flag in share metadata.";
         return false;
     }
+
+    /// <summary>
+    /// Determines whether share metadata allows offering a mod to clients.
+    /// </summary>
+    /// <param name="metadata">The share metadata to evaluate.</param>
+    /// <returns><c>true</c> when the metadata marks the mod as client-safe.</returns>
+    static bool IsClientShareAllowed(PluginShareMetadataStore.PluginShareMetadata metadata)
+        => metadata.ClientSafe ||
+           ContainsClientTag(metadata.Tags) ||
+           ContainsClientTag(metadata.Categories);
+
+    /// <summary>
+    /// Determines whether a shared mod should be hotloaded after client transfer.
+    /// </summary>
+    /// <param name="isZip">Whether the shared mod is a ZIP archive.</param>
+    /// <param name="metadata">The share metadata to evaluate.</param>
+    /// <returns><c>true</c> when the DLL is client-shareable and explicitly hotload-enabled.</returns>
+    static bool IsSharedModHotloadAllowed(bool isZip, PluginShareMetadataStore.PluginShareMetadata metadata)
+        => !isZip && metadata.HotloadAllowed && IsClientShareAllowed(metadata);
+
+    /// <summary>
+    /// Exposes shared-mod hotload eligibility for focused unit coverage.
+    /// </summary>
+    /// <param name="isZip">Whether the shared mod is a ZIP archive.</param>
+    /// <param name="metadata">The share metadata to evaluate.</param>
+    /// <returns><c>true</c> when the mod should be offered for runtime hotload.</returns>
+    internal static bool IsSharedModHotloadAllowedForTesting(
+        bool isZip,
+        PluginShareMetadataStore.PluginShareMetadata metadata)
+        => IsSharedModHotloadAllowed(isZip, metadata);
 
     /// <summary>
     /// Checks whether a tag collection includes the client tag.
