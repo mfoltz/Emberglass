@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v0.2.0
+
+- Made the shared-mod request button act as the consent boundary for initial VShare demos, auto-accepting eligible clientbound offers received in the request window.
+- Added configurable VShare transfer throttling for per-frame work budget, per-frame work steps, and active outgoing transfer limits.
+- Queued accepted outgoing transfers fairly when the active transfer limit is reached, reducing server hitch risk during shared-mod delivery.
+- Added local staged-DLL digest support for runtime proof flows without requiring a temporary GitHub prerelease.
+
 ## v0.1.6
 
 - Hardened VShare runtime hotload loading with explicit success/failure receipts, already-loaded assembly guards, duplicate plugin GUID detection, and repo-name metadata key fallback.

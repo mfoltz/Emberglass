@@ -51,7 +51,8 @@ public sealed class SystemTransferWorkQueueClock : ITransferWorkQueueClock
 public readonly record struct TransferWorkQueueProgress(
     int StepsProcessed,
     int TransfersCompleted,
-    bool BudgetExceeded);
+    bool BudgetExceeded,
+    bool StepLimitExceeded = false);
 
 /// <summary>
 /// Schedules transfer steps across multiple transfers with a bounded time budget.
@@ -111,10 +112,24 @@ public sealed class TransferWorkQueue
     /// <param name="timeBudget">Maximum amount of time to spend processing.</param>
     /// <returns>The processing summary for the pass.</returns>
     public TransferWorkQueueProgress Process(TimeSpan timeBudget)
+        => Process(timeBudget, null);
+
+    /// <summary>
+    /// Processes queued transfer work until the time or step budget is exhausted.
+    /// </summary>
+    /// <param name="timeBudget">Maximum amount of time to spend processing.</param>
+    /// <param name="maxSteps">Maximum number of work steps to execute, or <c>null</c> for no step cap.</param>
+    /// <returns>The processing summary for the pass.</returns>
+    public TransferWorkQueueProgress Process(TimeSpan timeBudget, int? maxSteps)
     {
         if (timeBudget < TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(timeBudget), "Time budget must be non-negative.");
+        }
+
+        if (maxSteps < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxSteps), "Step budget must be non-negative.");
         }
 
         if (workItems.Count == 0)
@@ -122,21 +137,28 @@ public sealed class TransferWorkQueue
             return new TransferWorkQueueProgress(0, 0, false);
         }
 
-        if (timeBudget == TimeSpan.Zero)
+        if (timeBudget == TimeSpan.Zero || maxSteps == 0)
         {
-            return new TransferWorkQueueProgress(0, 0, true);
+            return new TransferWorkQueueProgress(0, 0, timeBudget == TimeSpan.Zero, maxSteps == 0);
         }
 
         DateTime startTime = clock.UtcNow;
         int stepsProcessed = 0;
         int transfersCompleted = 0;
         bool budgetExceeded = false;
+        bool stepLimitExceeded = false;
 
-        while (workItems.Count > 0 && !budgetExceeded)
+        while (workItems.Count > 0 && !budgetExceeded && !stepLimitExceeded)
         {
             int itemsThisCycle = workItems.Count;
             for (int i = 0; i < itemsThisCycle; i++)
             {
+                if (maxSteps.HasValue && stepsProcessed >= maxSteps.Value)
+                {
+                    stepLimitExceeded = true;
+                    break;
+                }
+
                 if (IsBudgetExceeded(startTime, timeBudget))
                 {
                     budgetExceeded = true;
@@ -163,7 +185,7 @@ public sealed class TransferWorkQueue
             }
         }
 
-        return new TransferWorkQueueProgress(stepsProcessed, transfersCompleted, budgetExceeded);
+        return new TransferWorkQueueProgress(stepsProcessed, transfersCompleted, budgetExceeded, stepLimitExceeded);
     }
 
     /// <summary>

@@ -1,4 +1,6 @@
 using Emberglass.Patches.Shared;
+using HarmonyLib;
+using System.Reflection;
 using Xunit;
 
 namespace Emberglass.Tests.Network;
@@ -56,10 +58,41 @@ public sealed class WorldBootstrapPatchesTests : IDisposable
     }
 
     /// <summary>
+    /// Ensures teardown clears the bootstrap patch sentinel so later initialization can patch again.
+    /// </summary>
+    [Fact]
+    public void Uninitialize_ClearsHarmonySentinel()
+    {
+        FieldInfo HarmonyField = GetHarmonyField();
+        HarmonyField.SetValue(null, new Harmony("emberglass.test.worldbootstrap"));
+
+        WorldBootstrapPatches.Uninitialize();
+
+        Assert.Null(HarmonyField.GetValue(null));
+    }
+
+    /// <summary>
+    /// Ensures initialization keeps the bootstrap patch ready for systems registered later.
+    /// </summary>
+    [Fact]
+    public void ShouldInitializePatch_DoesNotRequireRegisteredSystems()
+    {
+        Assert.True(WorldBootstrapPatches.TestHooks.ShouldInitializePatch());
+    }
+
+    /// <summary>
     /// Clears registered systems after each test.
     /// </summary>
     public void Dispose()
-        => WorldBootstrapPatches.TestHooks.ClearRegisteredSystems();
+    {
+        WorldBootstrapPatches.TestHooks.ClearRegisteredSystems();
+        GetHarmonyField().SetValue(null, null);
+    }
+
+    static FieldInfo GetHarmonyField()
+        => typeof(WorldBootstrapPatches)
+            .GetField("_harmony", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WorldBootstrapPatches._harmony field not found.");
 
     sealed class PlainClientSystem
     {

@@ -20,7 +20,8 @@ public sealed class SharedModHotloadEligibilityTests
             true,
             true,
             Array.Empty<string>(),
-            Array.Empty<string>());
+            Array.Empty<string>(),
+            string.Empty);
 
         PluginShareMetadataStore.PluginShareMetadata downloadOnly = eligible with
         {

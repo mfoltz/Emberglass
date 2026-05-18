@@ -13,23 +13,30 @@ internal static class GameBootstrapPatch
 {
     static Harmony _harmony;
     static bool _initialized;
+    static bool _unityBehaviourInitialized;
     public static void Initialize()
     {
         try
         {
+            if (VWorld.IsServer)
+            {
+                VWorld.Log.LogInfo("[GameBootstrapPatch] Registering server observer systems.");
+                ObserverSystemRegistry.RegisterAll();
+                VWorld.Log.LogInfo("[GameBootstrapPatch] Server observer registration returned.");
+            }
+
+            VWorld.Log.LogInfo("[GameBootstrapPatch] Initializing world bootstrap patches.");
             WorldBootstrapPatches.Initialize();
-            VBehaviour.Initialize();
-            VBehaviour.MainThreadInvoker = new MainThreadInvoker();
+            VWorld.Log.LogInfo("[GameBootstrapPatch] World bootstrap patch initialization returned.");
 
             if (VWorld.IsServer)
             {
-                ObserverSystemRegistry.RegisterAll();
-                ChatMessageSystemPatch.Initialize();
-                VShare.Initialize();
+                VWorld.Log.LogInfo("[GameBootstrapPatch] Server-side runtime module initialization deferred.");
             }
 
             if (VWorld.IsClient)
             {
+                VWorld.Log.LogInfo("[GameBootstrapPatch] Initializing client-side modules.");
                 ClientChatSystemPatch.Initialize();
                 InputActionSystemPatch.Initialize();
                 OptionsMenuPatches.Initialize();
@@ -48,6 +55,7 @@ internal static class GameBootstrapPatch
 
                         Transference.RequestSharedModsFromMenu();
                     });
+                VWorld.Log.LogInfo("[GameBootstrapPatch] Client-side module initialization returned.");
             }
         }
         catch (Exception ex)
@@ -61,6 +69,7 @@ internal static class GameBootstrapPatch
     {
         _harmony?.UnpatchSelf();
         _initialized = false;
+        _unityBehaviourInitialized = false;
 
         WorldBootstrapPatches.Uninitialize();
         VBehaviour.Uninitialize();
@@ -97,11 +106,20 @@ internal static class GameBootstrapPatch
             return;
         }
 
+        EnsureUnityBehaviourInitialized();
         VEvents.Initialize();
         API.Shared.VNetwork.Initialize();
 
         if (VWorld.IsServer)
         {
+            VWorld.Log.LogInfo("[GameBootstrapPatch] Initializing server-side runtime modules.");
+            VWorld.Log.LogInfo("[GameBootstrapPatch] Initializing server chat message patch.");
+            ChatMessageSystemPatch.Initialize();
+            VWorld.Log.LogInfo("[GameBootstrapPatch] Server chat message patch initialization returned.");
+            VWorld.Log.LogInfo("[GameBootstrapPatch] Initializing VShare.");
+            VShare.Initialize();
+            VWorld.Log.LogInfo("[GameBootstrapPatch] VShare initialization returned.");
+            VWorld.Log.LogInfo("[GameBootstrapPatch] Server-side runtime module initialization returned.");
             Players.Initialize();
             PlayerPresenceValidationProbe.Initialize();
         }
@@ -113,5 +131,17 @@ internal static class GameBootstrapPatch
         }
 
         _initialized = true;
+    }
+
+    static void EnsureUnityBehaviourInitialized()
+    {
+        if (_unityBehaviourInitialized)
+        {
+            return;
+        }
+
+        VBehaviour.Initialize();
+        VBehaviour.MainThreadInvoker = new MainThreadInvoker();
+        _unityBehaviourInitialized = true;
     }
 }

@@ -11,11 +11,18 @@ public static class WorldBootstrapPatches
     static Harmony _harmony;
     public static void Initialize()
     {
+        if (!ShouldInitializePatch())
+        {
+            return;
+        }
+
         _harmony = Harmony.CreateAndPatchAll(typeof(WorldBootstrapPatches), MyPluginInfo.PLUGIN_GUID);
     }
     public static void Uninitialize()
     {
-        _harmony?.UnpatchSelf();
+        Harmony harmony = _harmony;
+        _harmony = null;
+        harmony?.UnpatchSelf();
     }
 
     static readonly List<Type> _clientSystems =
@@ -139,7 +146,12 @@ public static class WorldBootstrapPatches
             => ValidateIl2CppSystemType(systemType);
         public static void ExecuteRegistration(IEnumerable<Type> systems, Action<Type> registerSystem, Action sortSystems)
             => WorldBootstrapPatches.ExecuteRegistration(systems, registerSystem, sortSystems);
+        public static bool ShouldInitializePatch()
+            => WorldBootstrapPatches.ShouldInitializePatch();
     }
+
+    static bool ShouldInitializePatch()
+        => _harmony is null;
 
     // Unmanaged Detour
     /*
