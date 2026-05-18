@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.2.1
+
+- Added generated GitHub prerelease notes and staged Thunderstore changelog validation for release handoff.
+
 ## v0.2.0
 
 - Made the shared-mod request button act as the consent boundary for initial VShare demos, auto-accepting eligible clientbound offers received in the request window.
