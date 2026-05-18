@@ -62,5 +62,35 @@ public sealed class OutgoingTransferSchedulerTests
         Assert.Equal(0, scheduler.QueuedCount);
     }
 
-    readonly record struct TestOutgoingTransfer(Guid TransferId) : IOutgoingTransferWork;
+    /// <summary>
+    /// Ensures queued work for a disconnected target can be removed without disturbing active transfers.
+    /// </summary>
+    [Fact]
+    public void RemoveQueued_RemovesMatchingQueuedTransfersOnly()
+    {
+        OutgoingTransferScheduler<TestOutgoingTransfer> scheduler = new(maxActiveTransfers: 1);
+        List<Guid> started = new();
+
+        TestOutgoingTransfer active = new(Guid.NewGuid(), TargetId: 100);
+        TestOutgoingTransfer disconnectedQueued = new(Guid.NewGuid(), TargetId: 100);
+        TestOutgoingTransfer retainedQueued = new(Guid.NewGuid(), TargetId: 200);
+
+        scheduler.EnqueueOrStart(active, transfer => started.Add(transfer.TransferId));
+        scheduler.EnqueueOrStart(disconnectedQueued, transfer => started.Add(transfer.TransferId));
+        scheduler.EnqueueOrStart(retainedQueued, transfer => started.Add(transfer.TransferId));
+
+        IReadOnlyList<TestOutgoingTransfer> removed = scheduler.RemoveQueued(transfer => transfer.TargetId == 100);
+
+        Assert.Equal(new[] { disconnectedQueued.TransferId }, removed.Select(transfer => transfer.TransferId));
+        Assert.Equal(1, scheduler.ActiveCount);
+        Assert.Equal(1, scheduler.QueuedCount);
+
+        scheduler.Complete(active.TransferId, transfer => started.Add(transfer.TransferId));
+
+        Assert.Equal(new[] { active.TransferId, retainedQueued.TransferId }, started);
+        Assert.Equal(1, scheduler.ActiveCount);
+        Assert.Equal(0, scheduler.QueuedCount);
+    }
+
+    readonly record struct TestOutgoingTransfer(Guid TransferId, ulong TargetId = 0) : IOutgoingTransferWork;
 }

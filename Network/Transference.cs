@@ -268,7 +268,10 @@ internal static class Transference
         public readonly Guid Id = id;
         public readonly bool Hotload = hotload;
     }
-    readonly record struct QueuedOutgoingTransfer(Guid TransferId, User Target, TransferRequest Request) : IOutgoingTransferWork;
+    readonly record struct QueuedOutgoingTransfer(Guid TransferId, User Target, TransferRequest Request) : IOutgoingTransferWork
+    {
+        public ulong TargetId => Target.PlatformId;
+    }
     public unsafe struct TransferChunk
     {
         public readonly Guid Id;
@@ -318,6 +321,7 @@ internal static class Transference
     static readonly Dictionary<OverwriteConfirmationKey, DateTime> overwriteConfirmations = [];
     static readonly object overwriteConfirmationLock = new();
     static DateTime sharedModRequestConsentExpiresAtUtc = DateTime.MinValue;
+    static long sharedModRequestConsentClientSessionGeneration = -1;
     static bool offerCleanupStarted;
     static bool incomingCleanupStarted;
     static bool transferWorkQueueStarted;
@@ -438,6 +442,10 @@ internal static class Transference
         if (VWorld.IsServer)
         {
             ModuleRegistry.Subscribe<UserDisconnected>(OnUserDisconnected);
+        }
+        else if (VWorld.IsClient)
+        {
+            API.Shared.VNetwork.OnClientSessionReset += ClearSharedModRequestConsent;
         }
 
         StartOfferCleanup();
@@ -654,6 +662,14 @@ internal static class Transference
         lock (outgoingTransferLock)
         {
             return outgoingTransferScheduler.QueuedCount;
+        }
+    }
+
+    static IReadOnlyList<QueuedOutgoingTransfer> RemoveQueuedOutgoingTransfersForUser(ulong targetId)
+    {
+        lock (outgoingTransferLock)
+        {
+            return outgoingTransferScheduler.RemoveQueued(transfer => transfer.TargetId == targetId);
         }
     }
 
@@ -1151,6 +1167,13 @@ internal static class Transference
         {
             VWorld.Log.LogWarning(
                 $"Incoming transfer cleared on disconnect ~ ID: {transfer.Id} | Plugin: {transfer.FileName} | Target: {targetId}");
+        }
+
+        IReadOnlyList<QueuedOutgoingTransfer> removedOutgoingTransfers = RemoveQueuedOutgoingTransfersForUser(targetId);
+        foreach (QueuedOutgoingTransfer transfer in removedOutgoingTransfers)
+        {
+            VWorld.Log.LogWarning(
+                $"Queued outgoing transfer cleared on disconnect ~ ID: {transfer.TransferId} | Plugin: {transfer.Request.FileNameString} | Target: {targetId}");
         }
     }
     static IEnumerator IncomingRoutine(TransferComplete complete, IncomingTransfer incoming)
@@ -4434,23 +4457,36 @@ internal static class Transference
         => !isZip && metadata.HotloadAllowed && IsClientShareAllowed(metadata);
 
     static void RecordSharedModRequestConsent(DateTime requestedAtUtc)
+        => RecordSharedModRequestConsent(requestedAtUtc, API.Shared.VNetwork.ClientSessionGeneration);
+
+    static void RecordSharedModRequestConsent(DateTime requestedAtUtc, long clientSessionGeneration)
     {
         sharedModRequestConsentExpiresAtUtc = requestedAtUtc.Add(offerTimeout);
+        sharedModRequestConsentClientSessionGeneration = clientSessionGeneration;
     }
 
     static bool ShouldAutoAcceptSharedModOffer(TransferOffer offer, DateTime nowUtc)
-        => offer.Clientbound && nowUtc <= sharedModRequestConsentExpiresAtUtc;
+        => ShouldAutoAcceptSharedModOffer(offer, nowUtc, API.Shared.VNetwork.ClientSessionGeneration);
 
-    internal static void RecordSharedModRequestConsentForTesting(DateTime requestedAtUtc)
-        => RecordSharedModRequestConsent(requestedAtUtc);
+    static bool ShouldAutoAcceptSharedModOffer(TransferOffer offer, DateTime nowUtc, long clientSessionGeneration)
+        => offer.Clientbound
+        && clientSessionGeneration == sharedModRequestConsentClientSessionGeneration
+        && nowUtc <= sharedModRequestConsentExpiresAtUtc;
+
+    internal static void RecordSharedModRequestConsentForTesting(DateTime requestedAtUtc, long clientSessionGeneration)
+        => RecordSharedModRequestConsent(requestedAtUtc, clientSessionGeneration);
 
     internal static void ClearSharedModRequestConsentForTesting()
+        => ClearSharedModRequestConsent();
+
+    static void ClearSharedModRequestConsent()
     {
         sharedModRequestConsentExpiresAtUtc = DateTime.MinValue;
+        sharedModRequestConsentClientSessionGeneration = -1;
     }
 
-    internal static bool ShouldAutoAcceptSharedModOfferForTesting(TransferOffer offer, DateTime nowUtc)
-        => ShouldAutoAcceptSharedModOffer(offer, nowUtc);
+    internal static bool ShouldAutoAcceptSharedModOfferForTesting(TransferOffer offer, DateTime nowUtc, long clientSessionGeneration)
+        => ShouldAutoAcceptSharedModOffer(offer, nowUtc, clientSessionGeneration);
 
     /// <summary>
     /// Exposes shared-mod hotload eligibility for focused unit coverage.

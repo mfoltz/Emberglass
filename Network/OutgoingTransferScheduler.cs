@@ -109,4 +109,38 @@ internal sealed class OutgoingTransferScheduler<TWork>
             startTransfer(next);
         }
     }
+
+    /// <summary>
+    /// Removes queued transfers that match the provided predicate without touching active transfers.
+    /// </summary>
+    /// <param name="shouldRemove">Predicate that identifies queued work to remove.</param>
+    /// <returns>The removed queued work items in their original FIFO order.</returns>
+    public IReadOnlyList<TWork> RemoveQueued(Predicate<TWork> shouldRemove)
+    {
+        if (shouldRemove is null)
+        {
+            throw new ArgumentNullException(nameof(shouldRemove));
+        }
+
+        if (queuedTransfers.Count == 0)
+        {
+            return Array.Empty<TWork>();
+        }
+
+        List<TWork> removed = [];
+        int queuedCount = queuedTransfers.Count;
+        for (int i = 0; i < queuedCount; i++)
+        {
+            TWork work = queuedTransfers.Dequeue();
+            if (shouldRemove(work))
+            {
+                removed.Add(work);
+                continue;
+            }
+
+            queuedTransfers.Enqueue(work);
+        }
+
+        return removed;
+    }
 }
