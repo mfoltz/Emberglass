@@ -24,9 +24,22 @@ sends a request to the server to list any server-staged mods that the client doe
 
 ## Consent and Offer Flow
 
-VShare is opt-in. The server responds to a request with transfer offers for each eligible mod. The client sees the
-incoming offer(s) and can accept or decline each one. Transfers only proceed after acceptance, and declines are recorded
-so clients stay in control of what gets downloaded.
+VShare is opt-in. Selecting **"Request Shared Mods"** is the client consent action for shared clientbound mods. The
+server responds with transfer offers for each eligible missing mod, and offers received shortly after that request are
+accepted automatically so the initial flow stays one-button from the player's perspective.
+
+## Transfer Throttling
+
+VShare transfer work is throttled globally so server and client frames stay gentle while files are sent, received,
+verified, written, and hotloaded. The defaults favor runtime safety over raw throughput:
+
+* `VShare.TransferWorkBudgetMs = 2` - per-frame transfer work time budget, clamped from `1` to `10`.
+* `VShare.MaxTransferWorkStepsPerFrame = 8` - per-frame transfer work step cap across all transfers, clamped from `1`
+  to `64`.
+* `VShare.MaxActiveOutgoingTransfers = 2` - active outgoing transfer limit, clamped from `1` to `8`.
+
+Accepted transfers beyond the active limit wait in FIFO order. The transfer work queue still interleaves work across
+active transfers so busy servers can favor predictable frame cost over bursty downloads.
 
 ## Share Metadata
 
@@ -45,6 +58,7 @@ Example:
       "GitHubTag": "v1.3.14-pre",
       "ClientSafe": true,
       "HotloadAllowed": true,
+      "LocalSha256": "",
       "Tags": ["client"],
       "Categories": []
     }
@@ -56,6 +70,8 @@ Example:
 
 * Supported file types: `.dll` and `.zip`.
 * GitHub release auto-resolution uses the `Owner_Repo_Tag.dll` naming convention (or `.zip`).
+* Local development proofs can set `LocalSha256` to the exact SHA-256 of the staged local file. This keeps byte-level
+  verification enabled without requiring a temporary GitHub prerelease for every rebuilt DLL.
 * `Owner` and `Repo` are always the first two underscore-separated segments; the remaining segments are the `Tag`.
 * If an `Owner`, `Repo`, or `Tag` segment needs underscores, escape them by doubling: `Owner__Repo__Tag`.
 

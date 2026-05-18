@@ -135,7 +135,8 @@ internal sealed class PluginShareMetadataStore
         bool ClientSafe,
         bool HotloadAllowed,
         IReadOnlyList<string> Tags,
-        IReadOnlyList<string> Categories);
+        IReadOnlyList<string> Categories,
+        string LocalSha256);
 
     sealed class PluginShareMetadataPayload
     {
@@ -150,6 +151,7 @@ internal sealed class PluginShareMetadataStore
         public bool HotloadAllowed { get; set; }
         public List<string> Tags { get; set; } = [];
         public List<string> Categories { get; set; } = [];
+        public string LocalSha256 { get; set; } = string.Empty;
 
         public PluginShareMetadata ToMetadata()
             => new(
@@ -158,6 +160,7 @@ internal sealed class PluginShareMetadataStore
                 ClientSafe,
                 HotloadAllowed,
                 Tags ?? [],
-                Categories ?? []);
+                Categories ?? [],
+                LocalSha256 ?? string.Empty);
     }
 }

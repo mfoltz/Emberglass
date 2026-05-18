@@ -93,6 +93,61 @@ public sealed class TransferWorkQueueTests
     }
 
     /// <summary>
+    /// Ensures a step budget stops processing even when time remains.
+    /// </summary>
+    [Fact]
+    public void Process_WithStepBudget_StopsBeforeTimeBudget()
+    {
+        ManualTransferWorkQueueClock Clock = new(new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        TransferWorkQueue Queue = new(Clock);
+        List<Guid> ExecutionLog = new();
+
+        Queue.Enqueue(new TestTransferWorkItem(
+            Guid.NewGuid(),
+            totalSteps: 5,
+            Clock,
+            TimeSpan.FromMilliseconds(1),
+            ExecutionLog));
+
+        TransferWorkQueueProgress Progress = Queue.Process(
+            TimeSpan.FromMilliseconds(500),
+            maxSteps: 2);
+
+        Assert.True(Progress.StepLimitExceeded);
+        Assert.False(Progress.BudgetExceeded);
+        Assert.Equal(2, Progress.StepsProcessed);
+        Assert.Equal(2, ExecutionLog.Count);
+        Assert.True(Queue.Count > 0);
+    }
+
+    /// <summary>
+    /// Ensures the step budget preserves transfer fairness.
+    /// </summary>
+    [Fact]
+    public void Process_WithStepBudget_InterleavesTransfers()
+    {
+        ManualTransferWorkQueueClock Clock = new(new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        TransferWorkQueue Queue = new(Clock);
+        List<Guid> ExecutionLog = new();
+
+        Guid FirstId = Guid.NewGuid();
+        Guid SecondId = Guid.NewGuid();
+        Guid ThirdId = Guid.NewGuid();
+
+        Queue.Enqueue(new TestTransferWorkItem(FirstId, 3, Clock, TimeSpan.FromMilliseconds(1), ExecutionLog));
+        Queue.Enqueue(new TestTransferWorkItem(SecondId, 3, Clock, TimeSpan.FromMilliseconds(1), ExecutionLog));
+        Queue.Enqueue(new TestTransferWorkItem(ThirdId, 3, Clock, TimeSpan.FromMilliseconds(1), ExecutionLog));
+
+        TransferWorkQueueProgress Progress = Queue.Process(
+            TimeSpan.FromMilliseconds(500),
+            maxSteps: 4);
+
+        Assert.True(Progress.StepLimitExceeded);
+        Assert.Equal(4, Progress.StepsProcessed);
+        Assert.Equal(new[] { FirstId, SecondId, ThirdId, FirstId }, ExecutionLog);
+    }
+
+    /// <summary>
     /// Provides a controllable clock for deterministic scheduling tests.
     /// </summary>
     sealed class ManualTransferWorkQueueClock : ITransferWorkQueueClock

@@ -268,6 +268,7 @@ internal static class Transference
         public readonly Guid Id = id;
         public readonly bool Hotload = hotload;
     }
+    readonly record struct QueuedOutgoingTransfer(Guid TransferId, User Target, TransferRequest Request) : IOutgoingTransferWork;
     public unsafe struct TransferChunk
     {
         public readonly Guid Id;
@@ -316,16 +317,19 @@ internal static class Transference
     static readonly object pendingOfferLock = new();
     static readonly Dictionary<OverwriteConfirmationKey, DateTime> overwriteConfirmations = [];
     static readonly object overwriteConfirmationLock = new();
+    static DateTime sharedModRequestConsentExpiresAtUtc = DateTime.MinValue;
     static bool offerCleanupStarted;
     static bool incomingCleanupStarted;
     static bool transferWorkQueueStarted;
     static bool _initialized;
+    static readonly object outgoingTransferLock = new();
 
     static readonly WaitForSeconds offerCleanupDelay = new(2f);
     static readonly WaitForSeconds incomingCleanupDelay = new(2f);
     static readonly PluginShareMetadataStore _shareMetadataStore = new();
     static readonly GitHubReleaseClient _gitHubReleaseClient = new();
     static readonly TransferWorkQueue transferWorkQueue = new();
+    static readonly OutgoingTransferScheduler<QueuedOutgoingTransfer> outgoingTransferScheduler = new(DEFAULT_MAX_ACTIVE_OUTGOING_TRANSFERS);
     static readonly Dictionary<ReleaseAssetCacheKey, ReleaseAssetCacheEntry> releaseAssetDigestCache = [];
     static readonly object releaseAssetDigestCacheLock = new();
     static readonly HashSet<string> _hotloadedPluginGuids = new(StringComparer.Ordinal);
@@ -335,6 +339,8 @@ internal static class Transference
     const char STAGED_ASSET_SINGLE_DELIMITER = '_';
     const int OFFER_TIMEOUT_SECONDS = 60;
     const int DEFAULT_TRANSFER_WORK_BUDGET_MS = 2;
+    const int DEFAULT_MAX_TRANSFER_WORK_STEPS_PER_FRAME = 8;
+    const int DEFAULT_MAX_ACTIVE_OUTGOING_TRANSFERS = 2;
     const int RELEASE_DIGEST_CACHE_TTL_MINUTES = 15;
     const int TRANSFER_WORK_QUEUE_LOG_INTERVAL_SECONDS = 5;
     delegate bool TryGetShareMetadataDelegate(
@@ -349,6 +355,14 @@ internal static class Transference
     /// transfer work yields between network chunk sends and avoids main-thread stalls.
     /// </remarks>
     internal static int TransferWorkQueueBudgetMs { get; set; } = DEFAULT_TRANSFER_WORK_BUDGET_MS;
+    /// <summary>
+    /// Gets or sets the maximum transfer work steps processed per frame.
+    /// </summary>
+    internal static int MaxTransferWorkStepsPerFrame { get; set; } = DEFAULT_MAX_TRANSFER_WORK_STEPS_PER_FRAME;
+    /// <summary>
+    /// Gets or sets the maximum number of outgoing transfers that may actively send at once.
+    /// </summary>
+    internal static int MaxActiveOutgoingTransfers { get; set; } = DEFAULT_MAX_ACTIVE_OUTGOING_TRANSFERS;
     /// <summary>
     /// Defines how long an incoming transfer can remain idle before it is pruned.
     /// Keep this comfortably above <see cref="Const.CHUNK_DELAY" /> so slow networks or
@@ -371,6 +385,26 @@ internal static class Transference
     /// </summary>
     /// <returns>The timeout duration for idle incoming transfers.</returns>
     internal static TimeSpan IncomingTransferTimeout => incomingTransferTimeout;
+    /// <summary>
+    /// Applies the current VShare transfer throttling settings.
+    /// </summary>
+    /// <param name="settings">The settings snapshot to apply.</param>
+    internal static void ConfigureTransferSettings(VShareTransferSettings settings)
+    {
+        if (settings is null)
+        {
+            throw new ArgumentNullException(nameof(settings));
+        }
+
+        TransferWorkQueueBudgetMs = settings.TransferWorkBudgetMs;
+        MaxTransferWorkStepsPerFrame = settings.MaxTransferWorkStepsPerFrame;
+        MaxActiveOutgoingTransfers = settings.MaxActiveOutgoingTransfers;
+
+        lock (outgoingTransferLock)
+        {
+            outgoingTransferScheduler.SetMaxActiveTransfers(MaxActiveOutgoingTransfers);
+        }
+    }
     /// <summary>
     /// Occurs when an incoming transfer exceeds the idle timeout during cleanup.
     /// </summary>
@@ -423,7 +457,7 @@ internal static class Transference
     {
         if (VWorld.IsServer && request.Clientbound)
         {
-            if (!TryResolveGitHubReleaseDigestForOffer(request.FileNameString, out string resolveError))
+            if (!TryResolveShareDigestForOffer(request.FileNameString, out string resolveError))
             {
                 VWorld.Log.LogWarning(
                     $"Transfer offer skipped for {request.FileNameString}: {resolveError}");
@@ -531,7 +565,96 @@ internal static class Transference
 
     static void InternalTransferRequest(User user, TransferRequest request, Guid? transferId)
     {
-        TransferRoutine(user, request.FileNameString, request.Clientbound, request.Hotload, transferId).Run();
+        Guid id = transferId ?? Guid.NewGuid();
+        if (VWorld.IsServer && request.Clientbound)
+        {
+            QueueOutgoingTransfer(new QueuedOutgoingTransfer(id, user, request));
+            return;
+        }
+
+        TransferRoutine(user, request.FileNameString, request.Clientbound, request.Hotload, id).Run();
+    }
+
+    static void QueueOutgoingTransfer(QueuedOutgoingTransfer transfer)
+    {
+        bool started;
+        int activeCount;
+        int queuedCount;
+
+        lock (outgoingTransferLock)
+        {
+            started = outgoingTransferScheduler.EnqueueOrStart(transfer, StartOutgoingTransfer);
+            activeCount = outgoingTransferScheduler.ActiveCount;
+            queuedCount = outgoingTransferScheduler.QueuedCount;
+        }
+
+        if (!started)
+        {
+            VWorld.Log.LogWarning(
+                $"Transfer queued ~ ID: {transfer.TransferId} | Plugin: {transfer.Request.FileNameString} | " +
+                $"Active: {activeCount} | Queued: {queuedCount} | MaxActive: {MaxActiveOutgoingTransfers}");
+        }
+    }
+
+    static void StartOutgoingTransfer(QueuedOutgoingTransfer transfer)
+    {
+        VWorld.Log.LogWarning(
+            $"Transfer dispatch starting ~ ID: {transfer.TransferId} | Plugin: {transfer.Request.FileNameString}");
+        OutgoingTransferRoutine(transfer).Run();
+    }
+
+    static IEnumerator OutgoingTransferRoutine(QueuedOutgoingTransfer transfer)
+    {
+        try
+        {
+            IEnumerator routine = TransferRoutine(
+                transfer.Target,
+                transfer.Request.FileNameString,
+                transfer.Request.Clientbound,
+                transfer.Request.Hotload,
+                transfer.TransferId);
+
+            while (routine.MoveNext())
+            {
+                yield return routine.Current;
+            }
+        }
+        finally
+        {
+            CompleteOutgoingTransfer(transfer.TransferId);
+        }
+    }
+
+    static void CompleteOutgoingTransfer(Guid transferId)
+    {
+        int activeCount;
+        int queuedCount;
+
+        lock (outgoingTransferLock)
+        {
+            outgoingTransferScheduler.Complete(transferId, StartOutgoingTransfer);
+            activeCount = outgoingTransferScheduler.ActiveCount;
+            queuedCount = outgoingTransferScheduler.QueuedCount;
+        }
+
+        VWorld.Log.LogWarning(
+            $"Transfer dispatch completed ~ ID: {transferId} | Active: {activeCount} | Queued: {queuedCount}");
+    }
+
+    static int GetActiveOutgoingTransferCount()
+    {
+        lock (outgoingTransferLock)
+        {
+            return outgoingTransferScheduler.ActiveCount;
+        }
+    }
+
+    static int GetQueuedOutgoingTransferCount()
+    {
+        lock (outgoingTransferLock)
+        {
+            return outgoingTransferScheduler.QueuedCount;
+        }
     }
 
     /// <summary>
@@ -546,6 +669,8 @@ internal static class Transference
 
         ClientModSignature[] signatures = BuildClientModSignatures();
         API.Shared.VNetwork.SendToServer(new RequestSharedClientMods(signatures));
+        RecordSharedModRequestConsent(GetUtcNow());
+        VWorld.Log?.LogInfo($"Requested server-shared mods with {signatures.Length} local plugin signature(s).");
     }
 
     /// <summary>
@@ -567,6 +692,9 @@ internal static class Transference
         }
 
         ClientModLookup clientMods = BuildClientModLookup(request.ClientMods);
+        VWorld.Log.LogInfo(
+            $"Received shared mod request from {user.PlatformId}; " +
+            $"{request.ClientMods?.Length ?? 0} client signature(s), {sharedEntries.Count} staged share(s).");
 
         foreach (SharedModEntry entry in sharedEntries)
         {
@@ -614,7 +742,7 @@ internal static class Transference
                 yield break;
             }
 
-            yield return VerifyGitHubReleaseDigestRoutine(target, fileName, pluginName, rawBytes, result => verificationResult = result);
+            yield return VerifyShareDigestRoutine(target, fileName, pluginName, rawBytes, result => verificationResult = result);
             if (verificationResult.ShouldAbort)
             {
                 yield break;
@@ -845,6 +973,13 @@ internal static class Transference
 
         VWorld.Log.LogWarning(
             $"Transfer offer received ~ ID: {offer.Id} | Plugin: {offer.FileNameString} | Expires: {expiresAt:HH\\:mm\\:ss}");
+
+        if (ShouldAutoAcceptSharedModOffer(offer, GetUtcNow()))
+        {
+            VWorld.Log.LogWarning(
+                $"Auto-accepting shared mod offer from recent client request ~ ID: {offer.Id} | Plugin: {offer.FileNameString}");
+            TryAcceptTransferOffer(offer.Id);
+        }
     }
     /// <summary>
     /// Handles a client acceptance by starting the transfer on the server.
@@ -942,6 +1077,11 @@ internal static class Transference
             chunk.ChunkBytes));
     }
     static void OnTransferComplete(TransferComplete complete)
+    {
+        EnqueueTransferWorkItem(new TransferCompleteWorkItem(complete));
+    }
+
+    static void ProcessTransferComplete(TransferComplete complete)
     {
         IncomingTransfer incoming = null;
         bool ok = false;
@@ -1235,7 +1375,7 @@ internal static class Transference
             return new TransferWorkQueueProgress(0, 0, false);
         }
 
-        TransferWorkQueueProgress Progress = transferWorkQueue.Process(timeBudget);
+        TransferWorkQueueProgress Progress = transferWorkQueue.Process(timeBudget, MaxTransferWorkStepsPerFrame);
         LogTransferWorkQueueProgress(Progress);
         return Progress;
     }
@@ -1263,7 +1403,10 @@ internal static class Transference
         VWorld.Log?.LogWarning(
             $"Transfer work queue processed {progress.StepsProcessed} step(s), " +
             $"{progress.TransfersCompleted} transfer(s) completed, " +
-            $"budget exceeded: {progress.BudgetExceeded}.");
+            $"budget exceeded: {progress.BudgetExceeded}, " +
+            $"step cap exceeded: {progress.StepLimitExceeded}, " +
+            $"active outgoing: {GetActiveOutgoingTransferCount()}, " +
+            $"queued outgoing: {GetQueuedOutgoingTransferCount()}.");
     }
 
     /// <summary>
@@ -1273,7 +1416,7 @@ internal static class Transference
     /// <returns><c>true</c> when logging should occur; otherwise, <c>false</c>.</returns>
     static bool ShouldLogTransferWorkQueueProgress(TransferWorkQueueProgress progress)
     {
-        if (!progress.BudgetExceeded)
+        if (!progress.BudgetExceeded && !progress.StepLimitExceeded)
         {
             return false;
         }
@@ -1462,6 +1605,21 @@ internal static class Transference
     }
 
     /// <summary>
+    /// Gets the number of bytes received for a transfer under test.
+    /// </summary>
+    /// <param name="transferId">The transfer identifier.</param>
+    /// <returns>The received byte count, or <c>-1</c> when the transfer is not tracked.</returns>
+    internal static int GetIncomingReceivedBytesForTesting(Guid transferId)
+    {
+        lock (incomingLock)
+        {
+            return incomingTransfers.TryGetValue(transferId, out IncomingTransfer incoming)
+                ? incoming.ReceivedBytes
+                : -1;
+        }
+    }
+
+    /// <summary>
     /// Resets incoming transfer state for testing.
     /// </summary>
     internal static void ResetIncomingTransferStateForTesting()
@@ -1507,6 +1665,26 @@ internal static class Transference
     internal static void EnqueueTransferWorkItemForTesting(ITransferWorkItem workItem)
     {
         EnqueueTransferWorkItem(workItem);
+    }
+
+    /// <summary>
+    /// Queues an incoming transfer chunk for testing.
+    /// </summary>
+    /// <param name="transferId">The transfer identifier.</param>
+    /// <param name="index">The chunk index.</param>
+    /// <param name="bytes">The chunk payload.</param>
+    internal static void QueueTransferChunkForTesting(Guid transferId, int index, byte[] bytes)
+    {
+        EnqueueTransferWorkItem(new TransferChunkReceiveWorkItem(transferId, index, bytes));
+    }
+
+    /// <summary>
+    /// Queues transfer completion for testing.
+    /// </summary>
+    /// <param name="complete">The completion packet.</param>
+    internal static void QueueTransferCompleteForTesting(TransferComplete complete)
+    {
+        OnTransferComplete(complete);
     }
 
     /// <summary>
@@ -1616,25 +1794,25 @@ internal static class Transference
     }
     static void LogFailure(Guid transferId)
     {
-        VWorld.Log.LogWarning($"Transfer failed! ({DateTime.Now:HH\\:mm\\:ss})");
+        VWorld.Log?.LogWarning($"Transfer failed! ({DateTime.Now:HH\\:mm\\:ss})");
 
         lock (incomingLock)
         {
             if (!incomingTransfers.TryGetValue(transferId, out var incoming))
             {
-                VWorld.Log.LogWarning($"No transfer session found for {transferId}.");
+                VWorld.Log?.LogWarning($"No transfer session found for {transferId}.");
                 return;
             }
 
             if (incoming.IsComplete == false)
             {
-                VWorld.Log.LogWarning(
+                VWorld.Log?.LogWarning(
                     $"{incoming.TotalBytes.PrettyBytes()} bytes expected, only {incoming.ReceivedBytes.PrettyBytes()} bytes received...");
             }
 
             if (!incoming.Verify())
             {
-                VWorld.Log.LogWarning("Didn't pass SHA-256 verification...");
+                VWorld.Log?.LogWarning("Didn't pass SHA-256 verification...");
             }
 
             // VNetwork.SendToServer(new FileAck(transferId, false));
@@ -1879,6 +2057,16 @@ internal static class Transference
 
     internal static HotloadPluginResult TryLoadPluginForTesting(string filePath)
         => TryLoadPlugin(filePath);
+
+    internal static byte[] CompressBytesSynchronously(byte[] bytes)
+    {
+        byte[] result = null;
+        TransferCompressionWorkItem workItem = new(Guid.Empty, bytes, output => result = output);
+
+        while (!workItem.TryExecuteStep()) { }
+
+        return result;
+    }
 
     internal static Assembly ResolveHotloadAssemblyForTesting(string filePath, out bool reusedLoadedAssembly)
     {
@@ -2577,6 +2765,45 @@ internal static class Transference
                 }
             }
 
+            completed = true;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Schedules incoming transfer completion after queued chunk receive work.
+    /// </summary>
+    sealed class TransferCompleteWorkItem : ITransferWorkItem
+    {
+        readonly TransferComplete complete;
+        bool completed;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="TransferCompleteWorkItem"/> class.
+        /// </summary>
+        /// <param name="complete">The transfer completion packet.</param>
+        public TransferCompleteWorkItem(TransferComplete complete)
+        {
+            this.complete = complete;
+        }
+
+        /// <summary>
+        /// Gets the transfer identifier.
+        /// </summary>
+        public Guid TransferId => complete.Id;
+
+        /// <summary>
+        /// Executes the completion step.
+        /// </summary>
+        /// <returns><c>true</c> after completion processing runs.</returns>
+        public bool TryExecuteStep()
+        {
+            if (completed)
+            {
+                return true;
+            }
+
+            ProcessTransferComplete(complete);
             completed = true;
             return true;
         }
@@ -3468,12 +3695,12 @@ internal static class Transference
     }
 
     /// <summary>
-    /// Determines whether a transfer offer can be made based on GitHub Release asset digest resolution.
+    /// Determines whether a transfer offer can be made based on local or GitHub Release asset digest resolution.
     /// </summary>
     /// <param name="fileName">The staged asset file name.</param>
     /// <param name="errorMessage">An error message describing a failed resolution.</param>
     /// <returns><c>true</c> when the digest is resolved; otherwise <c>false</c>.</returns>
-    static bool TryResolveGitHubReleaseDigestForOffer(string fileName, out string errorMessage)
+    static bool TryResolveShareDigestForOffer(string fileName, out string errorMessage)
     {
         if (string.IsNullOrWhiteSpace(fileName))
         {
@@ -3481,8 +3708,21 @@ internal static class Transference
             return false;
         }
 
-        if (!TryResolveGitHubReleaseIdentityFromStagedFileName(
-                fileName,
+        string pluginName = Path.GetFileNameWithoutExtension(fileName);
+        if (TryResolveLocalShareDigest(pluginName, out _, out _, out bool localDigestConfigured, out string localDigestError))
+        {
+            errorMessage = string.Empty;
+            return true;
+        }
+
+        if (localDigestConfigured)
+        {
+            errorMessage = localDigestError;
+            return false;
+        }
+
+        if (!TryResolveGitHubReleaseIdentity(
+                pluginName,
                 out GitHubReleaseClient.GitHubReleaseIdentity identity,
                 out string identityError))
         {
@@ -3507,7 +3747,7 @@ internal static class Transference
     }
 
     /// <summary>
-    /// Verifies that the local raw file bytes match the GitHub Release asset digest before transfer.
+    /// Verifies that the local raw file bytes match the configured local or GitHub Release asset digest before transfer.
     /// </summary>
     /// <param name="target">The user receiving the transfer.</param>
     /// <param name="fileName">The file name being transferred.</param>
@@ -3515,7 +3755,7 @@ internal static class Transference
     /// <param name="rawBytes">The raw, uncompressed bytes used for hash comparison.</param>
     /// <param name="onComplete">Callback invoked with the verification result.</param>
     /// <returns>An enumerator for coroutine execution.</returns>
-    static IEnumerator VerifyGitHubReleaseDigestRoutine(
+    static IEnumerator VerifyShareDigestRoutine(
         User target,
         string fileName,
         string pluginName,
@@ -3523,6 +3763,34 @@ internal static class Transference
         Action<ReleaseDigestVerificationResult> onComplete)
     {
         bool isZip = fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
+
+        if (TryResolveLocalShareDigest(pluginName, out string localDigest, out byte[] localHashBytes, out bool localDigestConfigured, out string localDigestError))
+        {
+            string computedLocalHash = ComputeSha256Hex(rawBytes);
+            if (!string.Equals(computedLocalHash, localDigest, StringComparison.OrdinalIgnoreCase))
+            {
+                string message =
+                    $"Transfer aborted: Local share digest mismatch for {fileName}. " +
+                    $"Expected LocalSha256 {localDigest}, but local file hash is {computedLocalHash}.";
+
+                VWorld.Log.LogWarning(message);
+                SendTransferFailureMessage(target, message);
+                onComplete(new ReleaseDigestVerificationResult(true, localDigest, "local", []));
+                yield break;
+            }
+
+            onComplete(new ReleaseDigestVerificationResult(false, localDigest, "local", localHashBytes));
+            yield break;
+        }
+
+        if (localDigestConfigured)
+        {
+            string message = $"Transfer aborted: {localDigestError}";
+            VWorld.Log.LogWarning(message);
+            SendTransferFailureMessage(target, message);
+            onComplete(new ReleaseDigestVerificationResult(true, string.Empty, "local", []));
+            yield break;
+        }
 
         if (!TryResolveGitHubReleaseIdentity(pluginName, out GitHubReleaseClient.GitHubReleaseIdentity identity, out string resolveError))
         {
@@ -3745,8 +4013,20 @@ internal static class Transference
             string baseName = Path.GetFileNameWithoutExtension(fileName);
             bool isZip = fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
 
-            if (!TryResolveGitHubReleaseIdentityFromStagedFileName(
-                    fileName,
+            if (TryResolveLocalShareDigest(baseName, out string localDigest, out _, out bool localDigestConfigured, out string localDigestError))
+            {
+                entries.Add(new SharedModEntry(fileName, baseName, string.Empty, localDigest, isZip));
+                continue;
+            }
+
+            if (localDigestConfigured)
+            {
+                VWorld.Log.LogWarning($"Skipping shared mod {fileName}: {localDigestError}");
+                continue;
+            }
+
+            if (!TryResolveGitHubReleaseIdentity(
+                    baseName,
                     out GitHubReleaseClient.GitHubReleaseIdentity identity,
                     out string identityError))
             {
@@ -3824,6 +4104,61 @@ internal static class Transference
 
         CacheReleaseAssetDigest(identity, assetFileName, result);
         return result;
+    }
+
+    static bool TryResolveLocalShareDigest(
+        string pluginName,
+        out string digest,
+        out byte[] hashBytes,
+        out bool configured,
+        out string errorMessage)
+    {
+        digest = string.Empty;
+        hashBytes = [];
+        configured = false;
+
+        if (!_shareMetadataStore.TryGetPluginMetadata(
+                pluginName,
+                out PluginShareMetadataStore.PluginShareMetadata metadata,
+                out _))
+        {
+            errorMessage = string.Empty;
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(metadata.LocalSha256))
+        {
+            errorMessage = string.Empty;
+            return false;
+        }
+
+        configured = true;
+        return TryNormalizeLocalShareDigest(metadata.LocalSha256, out digest, out hashBytes, out errorMessage);
+    }
+
+    static bool TryNormalizeLocalShareDigest(
+        string value,
+        out string digest,
+        out byte[] hashBytes,
+        out string errorMessage)
+    {
+        hashBytes = [];
+        if (!GitHubReleaseClient.TryNormalizeSha256Digest(value, out digest, out errorMessage))
+        {
+            errorMessage = $"Share metadata LocalSha256 is invalid: {errorMessage}";
+            return false;
+        }
+
+        if (!TryConvertHexStringToBytes(digest, out hashBytes))
+        {
+            errorMessage = "Share metadata LocalSha256 was not a valid SHA-256 hex string.";
+            digest = string.Empty;
+            return false;
+        }
+
+        digest = digest.ToUpperInvariant();
+        errorMessage = string.Empty;
+        return true;
     }
 
     /// <summary>
@@ -4098,6 +4433,25 @@ internal static class Transference
     static bool IsSharedModHotloadAllowed(bool isZip, PluginShareMetadataStore.PluginShareMetadata metadata)
         => !isZip && metadata.HotloadAllowed && IsClientShareAllowed(metadata);
 
+    static void RecordSharedModRequestConsent(DateTime requestedAtUtc)
+    {
+        sharedModRequestConsentExpiresAtUtc = requestedAtUtc.Add(offerTimeout);
+    }
+
+    static bool ShouldAutoAcceptSharedModOffer(TransferOffer offer, DateTime nowUtc)
+        => offer.Clientbound && nowUtc <= sharedModRequestConsentExpiresAtUtc;
+
+    internal static void RecordSharedModRequestConsentForTesting(DateTime requestedAtUtc)
+        => RecordSharedModRequestConsent(requestedAtUtc);
+
+    internal static void ClearSharedModRequestConsentForTesting()
+    {
+        sharedModRequestConsentExpiresAtUtc = DateTime.MinValue;
+    }
+
+    internal static bool ShouldAutoAcceptSharedModOfferForTesting(TransferOffer offer, DateTime nowUtc)
+        => ShouldAutoAcceptSharedModOffer(offer, nowUtc);
+
     /// <summary>
     /// Exposes shared-mod hotload eligibility for focused unit coverage.
     /// </summary>
@@ -4108,6 +4462,13 @@ internal static class Transference
         bool isZip,
         PluginShareMetadataStore.PluginShareMetadata metadata)
         => IsSharedModHotloadAllowed(isZip, metadata);
+
+    internal static bool TryNormalizeLocalShareDigestForTesting(
+        string value,
+        out string digest,
+        out byte[] hashBytes,
+        out string errorMessage)
+        => TryNormalizeLocalShareDigest(value, out digest, out hashBytes, out errorMessage);
 
     /// <summary>
     /// Checks whether a tag collection includes the client tag.

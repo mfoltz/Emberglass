@@ -1,6 +1,7 @@
 ﻿using BepInEx;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
+using Emberglass.Network;
 using Emberglass.Patches.Shared;
 
 namespace Emberglass;
@@ -17,7 +18,10 @@ internal class Plugin : BasePlugin
     }
     public override void Load()
     {
+        Logger.LogInfo("Entering plugin load.");
+        Transference.ConfigureTransferSettings(VShareTransferSettings.Bind(Config));
         GameBootstrapPatch.Initialize();
+        Logger.LogInfo("Game bootstrap initialization returned.");
         Logger.LogInfo($"{MyPluginInfo.PLUGIN_NAME}[{MyPluginInfo.PLUGIN_VERSION}] loaded!");
     }
     public override bool Unload()

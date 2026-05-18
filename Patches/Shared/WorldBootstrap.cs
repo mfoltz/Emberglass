@@ -11,6 +11,11 @@ public static class WorldBootstrapPatches
     static Harmony _harmony;
     public static void Initialize()
     {
+        if (_harmony != null || !HasRegisteredSystems())
+        {
+            return;
+        }
+
         _harmony = Harmony.CreateAndPatchAll(typeof(WorldBootstrapPatches), MyPluginInfo.PLUGIN_GUID);
     }
     public static void Uninitialize()
@@ -140,6 +145,9 @@ public static class WorldBootstrapPatches
         public static void ExecuteRegistration(IEnumerable<Type> systems, Action<Type> registerSystem, Action sortSystems)
             => WorldBootstrapPatches.ExecuteRegistration(systems, registerSystem, sortSystems);
     }
+
+    static bool HasRegisteredSystems()
+        => _clientSystems.Count > 0 || _serverSystems.Count > 0;
 
     // Unmanaged Detour
     /*

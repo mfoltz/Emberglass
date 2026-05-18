@@ -35,7 +35,8 @@ public sealed class SharedModMetadataKeyTests
             false,
             false,
             Array.Empty<string>(),
-            Array.Empty<string>());
+            Array.Empty<string>(),
+            string.Empty);
         PluginShareMetadataStore.PluginShareMetadata safeEntry = unsafeEntry with
         {
             ClientSafe = true,
@@ -57,5 +58,25 @@ public sealed class SharedModMetadataKeyTests
         Assert.True(metadata.ClientSafe);
         Assert.True(metadata.HotloadAllowed);
         Assert.Equal(string.Empty, skipReason);
+    }
+
+    /// <summary>
+    /// Ensures local proof metadata can carry an exact SHA-256 digest without using a GitHub release.
+    /// </summary>
+    [Fact]
+    public void TryNormalizeLocalShareDigest_AcceptsAlgorithmQualifiedSha256()
+    {
+        string sourceDigest = "sha256:35e0048ca629f5d3a52b6368a838cf1a23d70d131b40a203c1a277c7e5c6e22a";
+
+        bool resolved = Transference.TryNormalizeLocalShareDigestForTesting(
+            sourceDigest,
+            out string digest,
+            out byte[] hashBytes,
+            out string errorMessage);
+
+        Assert.True(resolved);
+        Assert.Equal("35E0048CA629F5D3A52B6368A838CF1A23D70D131B40A203C1A277C7E5C6E22A", digest);
+        Assert.Equal(32, hashBytes.Length);
+        Assert.Equal(string.Empty, errorMessage);
     }
 }
