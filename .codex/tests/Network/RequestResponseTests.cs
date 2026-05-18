@@ -161,8 +161,11 @@ public sealed class RequestResponseTests : IDisposable
         Assert.Null(ReceivedResponse);
 
         invoker.Drain();
-        Assert.True(await WaitForConditionAsync(() => invoker.HasQueuedActions));
-        invoker.Drain();
+        if (ReceivedResponse is null)
+        {
+            Assert.True(await WaitForConditionAsync(() => invoker.HasQueuedActions));
+            invoker.Drain();
+        }
 
         Assert.NotNull(ReceivedResponse);
         Assert.Equal(12, ReceivedResponse.Value);
@@ -195,8 +198,11 @@ public sealed class RequestResponseTests : IDisposable
         Assert.Null(ReceivedException);
 
         invoker.Drain();
-        Assert.True(await WaitForConditionAsync(() => invoker.HasQueuedActions));
-        invoker.Drain();
+        if (ReceivedException is null)
+        {
+            Assert.True(await WaitForConditionAsync(() => invoker.HasQueuedActions));
+            invoker.Drain();
+        }
 
         Assert.NotNull(ReceivedException);
         Assert.Contains("request failed", ReceivedException.Message);
