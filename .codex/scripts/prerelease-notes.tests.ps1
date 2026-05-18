@@ -157,11 +157,23 @@ function Test-ReleaseWorkflowChecksStagedReleaseChangelog {
     $WorkflowPath = Join-Path (Split-Path -Parent (Split-Path -Parent $ScriptRoot)) ".github/workflows/release.yml"
     $WorkflowText = Get-Content -Raw -Path $WorkflowPath
 
+    $PreserveMarker = "      - name: Preserve release helper scripts"
+    $CheckoutMarker = "      - name: Checkout selected release tag"
     $StageMarker = "      - name: Stage selected release contents"
     $ChangelogMarker = "      - name: Validate staged release changelog"
 
+    $PreserveIndex = $WorkflowText.IndexOf($PreserveMarker, [StringComparison]::Ordinal)
+    $CheckoutIndex = $WorkflowText.IndexOf($CheckoutMarker, [StringComparison]::Ordinal)
     $StageIndex = $WorkflowText.IndexOf($StageMarker, [StringComparison]::Ordinal)
     $ChangelogIndex = $WorkflowText.IndexOf($ChangelogMarker, [StringComparison]::Ordinal)
+
+    if ($PreserveIndex -lt 0) {
+        throw "release.yml is missing the Preserve release helper scripts step."
+    }
+
+    if ($CheckoutIndex -lt 0) {
+        throw "release.yml is missing the Checkout selected release tag step."
+    }
 
     if ($StageIndex -lt 0) {
         throw "release.yml is missing the Stage selected release contents step."
@@ -171,12 +183,20 @@ function Test-ReleaseWorkflowChecksStagedReleaseChangelog {
         throw "release.yml is missing staged release changelog validation."
     }
 
+    if ($CheckoutIndex -lt $PreserveIndex) {
+        throw "Release helper scripts must be preserved before checking out the selected tag."
+    }
+
     if ($ChangelogIndex -lt $StageIndex) {
         throw "Staged release changelog validation must run after staging release contents."
     }
 
     if ($WorkflowText -notmatch '\./dist/thunderstore-publish/CHANGELOG\.md') {
         throw "release.yml should validate the staged Thunderstore publish changelog."
+    }
+
+    if ($WorkflowText -notmatch '\$RUNNER_TEMP/prerelease-notes\.sh') {
+        throw "release.yml should run changelog validation from the preserved helper script."
     }
 }
 
