@@ -11,7 +11,7 @@ public static class WorldBootstrapPatches
     static Harmony _harmony;
     public static void Initialize()
     {
-        if (_harmony != null || !HasRegisteredSystems())
+        if (!ShouldInitializePatch())
         {
             return;
         }
@@ -146,10 +146,12 @@ public static class WorldBootstrapPatches
             => ValidateIl2CppSystemType(systemType);
         public static void ExecuteRegistration(IEnumerable<Type> systems, Action<Type> registerSystem, Action sortSystems)
             => WorldBootstrapPatches.ExecuteRegistration(systems, registerSystem, sortSystems);
+        public static bool ShouldInitializePatch()
+            => WorldBootstrapPatches.ShouldInitializePatch();
     }
 
-    static bool HasRegisteredSystems()
-        => _clientSystems.Count > 0 || _serverSystems.Count > 0;
+    static bool ShouldInitializePatch()
+        => _harmony is null;
 
     // Unmanaged Detour
     /*

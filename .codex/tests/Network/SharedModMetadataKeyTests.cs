@@ -79,4 +79,39 @@ public sealed class SharedModMetadataKeyTests
         Assert.Equal(32, hashBytes.Length);
         Assert.Equal(string.Empty, errorMessage);
     }
+
+    /// <summary>
+    /// Ensures local proof digests can resolve through fallback metadata keys.
+    /// </summary>
+    [Fact]
+    public void TryResolveLocalShareDigest_UsesFallbackMetadataKeys()
+    {
+        string sourceDigest = "35e0048ca629f5d3a52b6368a838cf1a23d70d131b40a203c1a277c7e5c6e22a";
+        PluginShareMetadataStore.PluginShareMetadata metadata = new(
+            "mfoltz/Eclipse",
+            "v1.3.16",
+            true,
+            true,
+            Array.Empty<string>(),
+            Array.Empty<string>(),
+            sourceDigest);
+        var entries = new Dictionary<string, PluginShareMetadataStore.PluginShareMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Eclipse"] = metadata
+        };
+
+        bool resolved = Transference.TryResolveLocalShareDigestForTesting(
+            new[] { "mfoltz_Eclipse_v1.3.16", "Eclipse" },
+            entries,
+            out string digest,
+            out byte[] hashBytes,
+            out bool configured,
+            out string errorMessage);
+
+        Assert.True(resolved);
+        Assert.True(configured);
+        Assert.Equal("35E0048CA629F5D3A52B6368A838CF1A23D70D131B40A203C1A277C7E5C6E22A", digest);
+        Assert.Equal(32, hashBytes.Length);
+        Assert.Equal(string.Empty, errorMessage);
+    }
 }

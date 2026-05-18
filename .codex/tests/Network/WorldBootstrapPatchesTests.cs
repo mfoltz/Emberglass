@@ -72,6 +72,15 @@ public sealed class WorldBootstrapPatchesTests : IDisposable
     }
 
     /// <summary>
+    /// Ensures initialization keeps the bootstrap patch ready for systems registered later.
+    /// </summary>
+    [Fact]
+    public void ShouldInitializePatch_DoesNotRequireRegisteredSystems()
+    {
+        Assert.True(WorldBootstrapPatches.TestHooks.ShouldInitializePatch());
+    }
+
+    /// <summary>
     /// Clears registered systems after each test.
     /// </summary>
     public void Dispose()

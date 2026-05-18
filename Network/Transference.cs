@@ -3732,7 +3732,12 @@ internal static class Transference
         }
 
         string pluginName = Path.GetFileNameWithoutExtension(fileName);
-        if (TryResolveLocalShareDigest(pluginName, out _, out _, out bool localDigestConfigured, out string localDigestError))
+        if (TryResolveLocalShareDigest(
+                GetShareMetadataKeysForStagedFileName(fileName),
+                out _,
+                out _,
+                out bool localDigestConfigured,
+                out string localDigestError))
         {
             errorMessage = string.Empty;
             return true;
@@ -3787,7 +3792,12 @@ internal static class Transference
     {
         bool isZip = fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
 
-        if (TryResolveLocalShareDigest(pluginName, out string localDigest, out byte[] localHashBytes, out bool localDigestConfigured, out string localDigestError))
+        if (TryResolveLocalShareDigest(
+                GetShareMetadataKeysForStagedFileName(fileName),
+                out string localDigest,
+                out byte[] localHashBytes,
+                out bool localDigestConfigured,
+                out string localDigestError))
         {
             string computedLocalHash = ComputeSha256Hex(rawBytes);
             if (!string.Equals(computedLocalHash, localDigest, StringComparison.OrdinalIgnoreCase))
@@ -4034,11 +4044,13 @@ internal static class Transference
 
             string fileName = Path.GetFileName(modFile);
             string baseName = Path.GetFileNameWithoutExtension(fileName);
+            string metadataBaseName = GetShareMetadataBaseNameFromStagedFileName(fileName);
+            IReadOnlyList<string> metadataKeys = GetShareMetadataKeys(baseName, metadataBaseName);
             bool isZip = fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
 
-            if (TryResolveLocalShareDigest(baseName, out string localDigest, out _, out bool localDigestConfigured, out string localDigestError))
+            if (TryResolveLocalShareDigest(metadataKeys, out string localDigest, out _, out bool localDigestConfigured, out string localDigestError))
             {
-                entries.Add(new SharedModEntry(fileName, baseName, string.Empty, localDigest, isZip));
+                entries.Add(new SharedModEntry(fileName, baseName, metadataBaseName, localDigest, isZip));
                 continue;
             }
 
@@ -4135,28 +4147,58 @@ internal static class Transference
         out byte[] hashBytes,
         out bool configured,
         out string errorMessage)
+        => TryResolveLocalShareDigest(
+            [pluginName],
+            _shareMetadataStore.TryGetPluginMetadata,
+            out digest,
+            out hashBytes,
+            out configured,
+            out errorMessage);
+
+    static bool TryResolveLocalShareDigest(
+        IReadOnlyList<string> metadataKeys,
+        out string digest,
+        out byte[] hashBytes,
+        out bool configured,
+        out string errorMessage)
+        => TryResolveLocalShareDigest(
+            metadataKeys,
+            _shareMetadataStore.TryGetPluginMetadata,
+            out digest,
+            out hashBytes,
+            out configured,
+            out errorMessage);
+
+    static bool TryResolveLocalShareDigest(
+        IReadOnlyList<string> metadataKeys,
+        TryGetShareMetadataDelegate tryGetMetadata,
+        out string digest,
+        out byte[] hashBytes,
+        out bool configured,
+        out string errorMessage)
     {
         digest = string.Empty;
         hashBytes = [];
         configured = false;
 
-        if (!_shareMetadataStore.TryGetPluginMetadata(
-                pluginName,
-                out PluginShareMetadataStore.PluginShareMetadata metadata,
-                out _))
+        foreach (string metadataKey in metadataKeys)
         {
-            errorMessage = string.Empty;
-            return false;
+            if (!tryGetMetadata(metadataKey, out PluginShareMetadataStore.PluginShareMetadata metadata, out _))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(metadata.LocalSha256))
+            {
+                continue;
+            }
+
+            configured = true;
+            return TryNormalizeLocalShareDigest(metadata.LocalSha256, out digest, out hashBytes, out errorMessage);
         }
 
-        if (string.IsNullOrWhiteSpace(metadata.LocalSha256))
-        {
-            errorMessage = string.Empty;
-            return false;
-        }
-
-        configured = true;
-        return TryNormalizeLocalShareDigest(metadata.LocalSha256, out digest, out hashBytes, out errorMessage);
+        errorMessage = string.Empty;
+        return false;
     }
 
     static bool TryNormalizeLocalShareDigest(
@@ -4370,19 +4412,21 @@ internal static class Transference
     /// <param name="stagedFileName">The staged asset file name.</param>
     /// <returns>The ordered metadata keys to try.</returns>
     internal static IReadOnlyList<string> GetShareMetadataKeysForTesting(string stagedFileName)
+        => GetShareMetadataKeysForStagedFileName(stagedFileName);
+
+    static IReadOnlyList<string> GetShareMetadataKeysForStagedFileName(string stagedFileName)
     {
         string baseName = Path.GetFileNameWithoutExtension(stagedFileName);
-        string metadataBaseName = string.Empty;
-        if (TryResolveGitHubReleaseIdentityFromStagedFileName(
-                stagedFileName,
-                out GitHubReleaseClient.GitHubReleaseIdentity identity,
-                out _))
-        {
-            metadataBaseName = identity.Repo;
-        }
-
-        return GetShareMetadataKeys(baseName, metadataBaseName);
+        return GetShareMetadataKeys(baseName, GetShareMetadataBaseNameFromStagedFileName(stagedFileName));
     }
+
+    static string GetShareMetadataBaseNameFromStagedFileName(string stagedFileName)
+        => TryResolveGitHubReleaseIdentityFromStagedFileName(
+            stagedFileName,
+            out GitHubReleaseClient.GitHubReleaseIdentity identity,
+            out _)
+            ? identity.Repo
+            : string.Empty;
 
     internal static bool TrySelectClientShareMetadataForTesting(
         IReadOnlyList<string> metadataKeys,
@@ -4505,6 +4549,31 @@ internal static class Transference
         out byte[] hashBytes,
         out string errorMessage)
         => TryNormalizeLocalShareDigest(value, out digest, out hashBytes, out errorMessage);
+
+    internal static bool TryResolveLocalShareDigestForTesting(
+        IReadOnlyList<string> metadataKeys,
+        IReadOnlyDictionary<string, PluginShareMetadataStore.PluginShareMetadata> entries,
+        out string digest,
+        out byte[] hashBytes,
+        out bool configured,
+        out string errorMessage)
+        => TryResolveLocalShareDigest(
+            metadataKeys,
+            (string metadataKey, out PluginShareMetadataStore.PluginShareMetadata entry, out string metadataError) =>
+            {
+                if (entries.TryGetValue(metadataKey, out entry))
+                {
+                    metadataError = string.Empty;
+                    return true;
+                }
+
+                metadataError = $"Share metadata was not found for '{metadataKey}'.";
+                return false;
+            },
+            out digest,
+            out hashBytes,
+            out configured,
+            out errorMessage);
 
     /// <summary>
     /// Checks whether a tag collection includes the client tag.
