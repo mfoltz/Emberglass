@@ -20,7 +20,9 @@ public static class WorldBootstrapPatches
     }
     public static void Uninitialize()
     {
-        _harmony?.UnpatchSelf();
+        Harmony harmony = _harmony;
+        _harmony = null;
+        harmony?.UnpatchSelf();
     }
 
     static readonly List<Type> _clientSystems =
