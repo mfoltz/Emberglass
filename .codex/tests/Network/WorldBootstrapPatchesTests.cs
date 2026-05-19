@@ -1,4 +1,5 @@
 using Emberglass.Patches.Shared;
+using Emberglass.Systems;
 using Xunit;
 
 namespace Emberglass.Tests.Network;
@@ -53,6 +54,29 @@ public sealed class WorldBootstrapPatchesTests : IDisposable
             () => Calls.Add("sort"));
 
         Assert.Equal(new[] { "add:PlainClientSystem", "add:PlainServerSystem", "sort" }, Calls);
+    }
+
+    /// <summary>
+    /// Ensures the save-safety cleanup observer is injected before registration and later server observers.
+    /// </summary>
+    [Fact]
+    public void ObserverSystemRegistry_RegistersCustomPrefabCleanupBeforeOtherServerObservers()
+    {
+        ObserverSystemRegistry.RegisterAll();
+
+        IReadOnlyList<Type> Registered = WorldBootstrapPatches.TestHooks.RegisteredServerSystems;
+        List<Type> RegisteredList = Registered.ToList();
+
+        Assert.True(RegisteredList.IndexOf(typeof(CustomPrefabCleanupSystem)) >= 0);
+        Assert.True(RegisteredList.IndexOf(typeof(CustomPrefabRegistrationSystem)) >= 0);
+        Assert.True(RegisteredList.IndexOf(typeof(PlayerCharacterPresenceObserverSystem)) >= 0);
+        Assert.True(
+            RegisteredList.IndexOf(typeof(CustomPrefabCleanupSystem))
+            < RegisteredList.IndexOf(typeof(CustomPrefabRegistrationSystem)));
+        Assert.True(
+            RegisteredList.IndexOf(typeof(CustomPrefabRegistrationSystem))
+            < RegisteredList.IndexOf(typeof(PlayerCharacterPresenceObserverSystem)));
+        Assert.Contains(typeof(PlayerCharacterPresenceObserverSystem), Registered);
     }
 
     /// <summary>

@@ -421,6 +421,7 @@ public static class StubAssemblyResolver
                 || string.Equals(fullTypeName, "Unity.Entities.ArchetypeChunk", StringComparison.Ordinal)
                 || string.Equals(fullTypeName, "Unity.Entities.EntityTypeHandle", StringComparison.Ordinal)
                 || string.Equals(fullTypeName, "Unity.Entities.EntityStorageInfoLookup", StringComparison.Ordinal)
+                || string.Equals(fullTypeName, "Unity.Entities.ComponentType", StringComparison.Ordinal)
                 || string.Equals(fullTypeName, "Unity.Entities.EntityQuery", StringComparison.Ordinal)
                 || string.Equals(fullTypeName, "Unity.Entities.EntityQueryOptions", StringComparison.Ordinal)
                 || KnownGenericValueTypes.ContainsKey(fullTypeName)
@@ -1205,6 +1206,7 @@ public static class StubAssemblyResolver
                 {
                     "Unity.Entities.Entity",
                     "Unity.Entities.ArchetypeChunk",
+                    "Unity.Entities.ComponentType",
                     "Unity.Entities.EntityTypeHandle",
                     "Unity.Entities.EntityStorageInfoLookup",
                     "Unity.Entities.ComponentTypeHandle`1",
@@ -1214,6 +1216,7 @@ public static class StubAssemblyResolver
                     "Unity.Entities.World",
                     "Unity.Entities.EntityManager",
                     "Unity.Entities.EntityQuery",
+                    "Unity.Entities.EntityQueryDesc",
                     "Unity.Entities.ComponentSystemBase",
                     "Unity.Entities.SystemBase",
                     "Unity.Entities.EntityQueryOptions"

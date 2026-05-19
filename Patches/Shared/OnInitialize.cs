@@ -1,6 +1,7 @@
 using Emberglass.API.Client;
 using Emberglass.API.Server;
 using Emberglass.API.Shared;
+using Emberglass.CustomPrefabs;
 using Emberglass.Network;
 using Emberglass.Patches.Client;
 using Emberglass.Patches.Server;
@@ -23,6 +24,7 @@ internal static class GameBootstrapPatch
 
             if (VWorld.IsServer)
             {
+                CustomPrefabBuiltInProofDefinitions.Register();
                 ObserverSystemRegistry.RegisterAll();
                 ChatMessageSystemPatch.Initialize();
                 VShare.Initialize();
@@ -79,6 +81,7 @@ internal static class GameBootstrapPatch
         }
 
         RequestResponse.Uninitialize();
+        CustomPrefabMirrorCoordinator.Uninitialize();
 
         if (VWorld.IsServer)
         {
@@ -99,6 +102,7 @@ internal static class GameBootstrapPatch
 
         VEvents.Initialize();
         API.Shared.VNetwork.Initialize();
+        CustomPrefabMirrorCoordinator.Initialize();
 
         if (VWorld.IsServer)
         {
