@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a VShare provenance ladder with metadata-first GitHub release identity, required release digest checks for clientbound sharing, strict local preflight receipts, and GitHub Actions artifact attestations for Emberglass DLL release jobs.
+
 ## v0.2.1
 
 - Added generated GitHub prerelease notes and staged Thunderstore changelog validation for release handoff.

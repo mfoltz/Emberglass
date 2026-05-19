@@ -32,6 +32,7 @@ public sealed class SharedModMetadataKeyTests
         PluginShareMetadataStore.PluginShareMetadata unsafeEntry = new(
             "mfoltz/Eclipse",
             "v1.3.14-pre",
+            "Eclipse.dll",
             false,
             false,
             Array.Empty<string>(),
@@ -90,6 +91,7 @@ public sealed class SharedModMetadataKeyTests
         PluginShareMetadataStore.PluginShareMetadata metadata = new(
             "mfoltz/Eclipse",
             "v1.3.16",
+            "Eclipse.dll",
             true,
             true,
             Array.Empty<string>(),

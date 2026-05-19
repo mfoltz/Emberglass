@@ -3470,6 +3470,26 @@ internal static class Transference
         public bool IsZip { get; } = isZip;
     }
 
+    internal readonly record struct StagedReleaseIdentity(
+        string Owner,
+        string Repo,
+        string Tag,
+        string AssetName,
+        string MetadataKey,
+        bool FromMetadata);
+
+    readonly struct StagedReleaseProvenance(
+        StagedReleaseIdentity identity,
+        string releaseDigest,
+        string localSha256,
+        byte[] releaseDigestBytes)
+    {
+        public StagedReleaseIdentity Identity { get; } = identity;
+        public string ReleaseDigest { get; } = releaseDigest;
+        public string LocalSha256 { get; } = localSha256;
+        public byte[] ReleaseDigestBytes { get; } = releaseDigestBytes;
+    }
+
     readonly record struct ReleaseAssetCacheKey(string Owner, string Repo, string Tag, string AssetName);
 
     readonly struct ReleaseAssetCacheEntry(
@@ -3480,50 +3500,156 @@ internal static class Transference
         public DateTimeOffset ExpiresAt { get; } = expiresAt;
     }
 
-    /// <summary>
-    /// Resolves the GitHub Release identity for a staged plugin.
-    /// </summary>
-    /// <param name="pluginName">The plugin name without extension.</param>
-    /// <param name="identity">The resolved release identity.</param>
-    /// <param name="errorMessage">An error message describing a failed resolution.</param>
-    /// <returns><c>true</c> when the identity is resolved; otherwise <c>false</c>.</returns>
-    static bool TryResolveGitHubReleaseIdentity(
-        string pluginName,
-        out GitHubReleaseClient.GitHubReleaseIdentity identity,
+    internal static bool TryResolveStagedReleaseIdentityForTesting(
+        string stagedFileName,
+        IReadOnlyDictionary<string, PluginShareMetadataStore.PluginShareMetadata> entries,
+        out StagedReleaseIdentity identity,
+        out string errorMessage)
+        => TryResolveStagedReleaseIdentity(
+            stagedFileName,
+            (string metadataKey, out PluginShareMetadataStore.PluginShareMetadata metadata, out string lookupError) =>
+            {
+                if (entries.TryGetValue(metadataKey, out metadata))
+                {
+                    lookupError = string.Empty;
+                    return true;
+                }
+
+                lookupError = $"Share metadata was not found for '{metadataKey}'.";
+                return false;
+            },
+            out identity,
+            out errorMessage);
+
+    internal static bool TryValidateStagedReleaseDigestForTesting(
+        string fileName,
+        byte[] rawBytes,
+        string releaseDigest,
+        out string localSha256,
+        out byte[] releaseDigestBytes,
+        out string errorMessage)
+        => TryValidateStagedReleaseDigest(
+            fileName,
+            rawBytes,
+            releaseDigest,
+            out localSha256,
+            out releaseDigestBytes,
+            out errorMessage);
+
+    static bool TryResolveStagedReleaseIdentity(
+        string stagedFileName,
+        TryGetShareMetadataDelegate tryGetMetadata,
+        out StagedReleaseIdentity identity,
         out string errorMessage)
     {
-        if (TryResolveGitHubReleaseIdentityFromStagedAsset(pluginName, out identity, out errorMessage))
+        if (string.IsNullOrWhiteSpace(stagedFileName))
         {
-            return true;
+            identity = default;
+            errorMessage = "Staged asset file name was empty.";
+            return false;
         }
 
-        string stagedAssetError = errorMessage;
-        if (_shareMetadataStore.TryGetPluginMetadata(pluginName, out PluginShareMetadataStore.PluginShareMetadata metadata, out string metadataError))
+        if (!IsStagedAssetFile(stagedFileName))
         {
-            if (!TryParseGitHubRepo(metadata.GitHubRepo, out string owner, out string repo, out errorMessage))
+            identity = default;
+            errorMessage = $"Staged asset '{stagedFileName}' is not a supported shareable file.";
+            return false;
+        }
+
+        var metadataErrors = new List<string>();
+        foreach (string metadataKey in GetShareMetadataKeysForStagedFileName(stagedFileName))
+        {
+            if (!tryGetMetadata(metadataKey, out PluginShareMetadataStore.PluginShareMetadata metadata, out string metadataError))
             {
-                identity = default;
-                return false;
+                metadataErrors.Add(metadataError);
+                continue;
             }
 
-            if (string.IsNullOrWhiteSpace(metadata.GitHubTag))
+            if (TryResolveStagedReleaseIdentityFromMetadata(
+                    stagedFileName,
+                    metadataKey,
+                    metadata,
+                    out identity,
+                    out errorMessage))
             {
-                identity = default;
-                errorMessage = $"Share metadata for '{pluginName}' is missing GitHubTag.";
-                return false;
+                return true;
             }
 
-            identity = new GitHubReleaseClient.GitHubReleaseIdentity(owner, repo, metadata.GitHubTag);
+            metadataErrors.Add(errorMessage);
+        }
+
+        if (TryResolveGitHubReleaseIdentityFromStagedFileName(
+                stagedFileName,
+                out GitHubReleaseClient.GitHubReleaseIdentity fallbackIdentity,
+                out string stagedAssetError))
+        {
+            identity = new StagedReleaseIdentity(
+                fallbackIdentity.Owner,
+                fallbackIdentity.Repo,
+                fallbackIdentity.Tag,
+                Path.GetFileName(stagedFileName),
+                fallbackIdentity.Repo,
+                false);
             errorMessage = string.Empty;
             return true;
         }
 
         identity = default;
         errorMessage =
-            $"GitHub Release identity could not be resolved for '{pluginName}'. " +
-            $"Staged asset resolution failed: {stagedAssetError} " +
-            $"Share metadata resolution failed: {metadataError}";
+            $"GitHub Release identity could not be resolved for '{stagedFileName}'. " +
+            $"Metadata resolution failed: {string.Join(" ", metadataErrors)} " +
+            $"Staged asset resolution failed: {stagedAssetError}";
         return false;
+    }
+
+    static bool TryResolveStagedReleaseIdentityFromMetadata(
+        string stagedFileName,
+        string metadataKey,
+        PluginShareMetadataStore.PluginShareMetadata metadata,
+        out StagedReleaseIdentity identity,
+        out string errorMessage)
+    {
+        if (!TryParseGitHubRepo(metadata.GitHubRepo, out string owner, out string repo, out errorMessage))
+        {
+            identity = default;
+            errorMessage = $"Share metadata for '{metadataKey}' is invalid: {errorMessage}";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(metadata.GitHubTag))
+        {
+            identity = default;
+            errorMessage = $"Share metadata for '{metadataKey}' is missing GitHubTag.";
+            return false;
+        }
+
+        string assetName = string.IsNullOrWhiteSpace(metadata.GitHubAssetName)
+            ? Path.GetFileName(stagedFileName)
+            : metadata.GitHubAssetName.Trim();
+
+        if (string.IsNullOrWhiteSpace(assetName))
+        {
+            identity = default;
+            errorMessage = $"Share metadata for '{metadataKey}' did not resolve a GitHub Release asset name.";
+            return false;
+        }
+
+        if (!IsStagedAssetFile(assetName))
+        {
+            identity = default;
+            errorMessage = $"Share metadata for '{metadataKey}' references unsupported GitHubAssetName '{assetName}'.";
+            return false;
+        }
+
+        identity = new StagedReleaseIdentity(
+            owner,
+            repo,
+            metadata.GitHubTag,
+            assetName,
+            metadataKey,
+            true);
+        errorMessage = string.Empty;
+        return true;
     }
 
     /// <summary>
@@ -3718,55 +3844,150 @@ internal static class Transference
     }
 
     /// <summary>
-    /// Determines whether a transfer offer can be made based on local or GitHub Release asset digest resolution.
+    /// Determines whether a transfer offer can be made based on GitHub Release asset digest resolution.
     /// </summary>
     /// <param name="fileName">The staged asset file name.</param>
     /// <param name="errorMessage">An error message describing a failed resolution.</param>
     /// <returns><c>true</c> when the digest is resolved; otherwise <c>false</c>.</returns>
     static bool TryResolveShareDigestForOffer(string fileName, out string errorMessage)
     {
+        if (!TryGetServerStagedFilePath(fileName, out string stagedFilePath, out errorMessage))
+        {
+            return false;
+        }
+
+        byte[] rawBytes;
+        try
+        {
+            rawBytes = File.ReadAllBytes(stagedFilePath);
+        }
+        catch (IOException ex)
+        {
+            errorMessage = $"Unable to read staged asset '{fileName}' for provenance verification: {ex.Message}";
+            return false;
+        }
+
+        return TryResolveStagedReleaseProvenance(
+            fileName,
+            rawBytes,
+            out _,
+            out errorMessage);
+    }
+
+    static bool TryGetServerStagedFilePath(string fileName, out string stagedFilePath, out string errorMessage)
+    {
+        stagedFilePath = string.Empty;
         if (string.IsNullOrWhiteSpace(fileName))
         {
             errorMessage = "File name was empty.";
             return false;
         }
 
-        string pluginName = Path.GetFileNameWithoutExtension(fileName);
-        if (TryResolveLocalShareDigest(
-                GetShareMetadataKeysForStagedFileName(fileName),
-                out _,
-                out _,
-                out bool localDigestConfigured,
-                out string localDigestError))
+        if (!string.Equals(fileName, Path.GetFileName(fileName), StringComparison.Ordinal))
         {
-            errorMessage = string.Empty;
-            return true;
-        }
-
-        if (localDigestConfigured)
-        {
-            errorMessage = localDigestError;
+            errorMessage = $"File name '{fileName}' must not contain a directory path.";
             return false;
         }
 
-        if (!TryResolveGitHubReleaseIdentity(
-                pluginName,
-                out GitHubReleaseClient.GitHubReleaseIdentity identity,
+        if (!Directory.Exists(VShare.ServerModsPath))
+        {
+            Directory.CreateDirectory(VShare.ServerModsPath);
+            errorMessage =
+                $"Server share folder was missing and has been created at '{VShare.ServerModsPath}'. " +
+                "Stage .dll/.zip files here before retrying.";
+            return false;
+        }
+
+        string candidatePath = Path.Combine(VShare.ServerModsPath, fileName);
+        if (!File.Exists(candidatePath) || !IsStagedAssetFile(candidatePath))
+        {
+            errorMessage = $"No supported staged asset named '{fileName}' was found in '{VShare.ServerModsPath}'.";
+            return false;
+        }
+
+        stagedFilePath = candidatePath;
+        errorMessage = string.Empty;
+        return true;
+    }
+
+    static bool TryResolveStagedReleaseProvenance(
+        string stagedFileName,
+        byte[] rawBytes,
+        out StagedReleaseProvenance provenance,
+        out string errorMessage)
+    {
+        if (!TryResolveStagedReleaseIdentity(
+                stagedFileName,
+                _shareMetadataStore.TryGetPluginMetadata,
+                out StagedReleaseIdentity identity,
                 out string identityError))
         {
-            errorMessage = $"GitHub Release identity could not be resolved for '{fileName}': {identityError}";
+            provenance = default;
+            errorMessage = identityError;
             return false;
         }
 
-        if (!TryResolveReleaseAssetDigest(identity, fileName, out string digest, out string digestError))
+        var gitHubIdentity = new GitHubReleaseClient.GitHubReleaseIdentity(
+            identity.Owner,
+            identity.Repo,
+            identity.Tag);
+
+        if (!TryResolveReleaseAssetDigest(gitHubIdentity, identity.AssetName, out string digest, out string digestError))
         {
-            errorMessage = $"GitHub Release asset digest lookup failed for '{fileName}': {digestError}";
+            provenance = default;
+            errorMessage = $"GitHub Release asset digest lookup failed for '{identity.AssetName}': {digestError}";
             return false;
         }
 
-        if (!TryConvertHexStringToBytes(digest, out _))
+        if (!TryValidateStagedReleaseDigest(
+                stagedFileName,
+                rawBytes,
+                digest,
+                out string localSha256,
+                out byte[] releaseDigestBytes,
+                out string validationError))
         {
-            errorMessage = $"GitHub Release asset digest for '{fileName}' was not a valid hex string.";
+            provenance = default;
+            errorMessage = validationError;
+            return false;
+        }
+
+        provenance = new StagedReleaseProvenance(identity, digest, localSha256, releaseDigestBytes);
+        errorMessage = string.Empty;
+        return true;
+    }
+
+    static bool TryValidateStagedReleaseDigest(
+        string fileName,
+        byte[] rawBytes,
+        string releaseDigest,
+        out string localSha256,
+        out byte[] releaseDigestBytes,
+        out string errorMessage)
+    {
+        localSha256 = string.Empty;
+        releaseDigestBytes = [];
+
+        if (rawBytes is null)
+        {
+            errorMessage = $"GitHub Release asset digest could not be computed for {fileName}: staged bytes were missing.";
+            return false;
+        }
+
+        if (!TryConvertHexStringToBytes(releaseDigest, out releaseDigestBytes))
+        {
+            releaseDigestBytes = [];
+            errorMessage = $"GitHub Release asset digest for {fileName} was not a valid SHA-256 hex string.";
+            return false;
+        }
+
+        localSha256 = ComputeSha256Hex(rawBytes);
+        if (!string.Equals(localSha256, releaseDigest, StringComparison.OrdinalIgnoreCase))
+        {
+            releaseDigestBytes = [];
+            errorMessage =
+                $"GitHub Release asset digest mismatch for {fileName}. " +
+                $"Expected {releaseDigest}, but local file hash is {localSha256}.";
             return false;
         }
 
@@ -3775,7 +3996,7 @@ internal static class Transference
     }
 
     /// <summary>
-    /// Verifies that the local raw file bytes match the configured local or GitHub Release asset digest before transfer.
+    /// Verifies that the local raw file bytes match the GitHub Release asset digest before transfer.
     /// </summary>
     /// <param name="target">The user receiving the transfer.</param>
     /// <param name="fileName">The file name being transferred.</param>
@@ -3792,40 +4013,11 @@ internal static class Transference
     {
         bool isZip = fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
 
-        if (TryResolveLocalShareDigest(
-                GetShareMetadataKeysForStagedFileName(fileName),
-                out string localDigest,
-                out byte[] localHashBytes,
-                out bool localDigestConfigured,
-                out string localDigestError))
-        {
-            string computedLocalHash = ComputeSha256Hex(rawBytes);
-            if (!string.Equals(computedLocalHash, localDigest, StringComparison.OrdinalIgnoreCase))
-            {
-                string message =
-                    $"Transfer aborted: Local share digest mismatch for {fileName}. " +
-                    $"Expected LocalSha256 {localDigest}, but local file hash is {computedLocalHash}.";
-
-                VWorld.Log.LogWarning(message);
-                SendTransferFailureMessage(target, message);
-                onComplete(new ReleaseDigestVerificationResult(true, localDigest, "local", []));
-                yield break;
-            }
-
-            onComplete(new ReleaseDigestVerificationResult(false, localDigest, "local", localHashBytes));
-            yield break;
-        }
-
-        if (localDigestConfigured)
-        {
-            string message = $"Transfer aborted: {localDigestError}";
-            VWorld.Log.LogWarning(message);
-            SendTransferFailureMessage(target, message);
-            onComplete(new ReleaseDigestVerificationResult(true, string.Empty, "local", []));
-            yield break;
-        }
-
-        if (!TryResolveGitHubReleaseIdentity(pluginName, out GitHubReleaseClient.GitHubReleaseIdentity identity, out string resolveError))
+        if (!TryResolveStagedReleaseIdentity(
+                fileName,
+                _shareMetadataStore.TryGetPluginMetadata,
+                out StagedReleaseIdentity releaseIdentity,
+                out string resolveError))
         {
             string message = $"GitHub Release asset digest metadata not resolved for {pluginName}: {resolveError}";
             VWorld.Log.LogWarning(message);
@@ -3841,8 +4033,11 @@ internal static class Transference
         object lookupLock = new();
 
         _gitHubReleaseClient.BeginReleaseAssetDigestLookup(
-            identity,
-            fileName,
+            new GitHubReleaseClient.GitHubReleaseIdentity(
+                releaseIdentity.Owner,
+                releaseIdentity.Repo,
+                releaseIdentity.Tag),
+            releaseIdentity.AssetName,
             CancellationToken.None,
             result =>
             {
@@ -3875,33 +4070,32 @@ internal static class Transference
             yield break;
         }
 
-        string localHash = ComputeSha256Hex(rawBytes);
-        if (!string.Equals(localHash, digestResult.Digest, StringComparison.OrdinalIgnoreCase))
+        if (!TryValidateStagedReleaseDigest(
+                fileName,
+                rawBytes,
+                digestResult.Digest,
+                out _,
+                out byte[] hashBytes,
+                out string validationError))
         {
-            string message =
-                $"Transfer aborted: GitHub Release asset digest mismatch for {fileName}. " +
-                $"Expected tag {digestResult.Tag} digest {digestResult.Digest}, " +
-                $"but local file hash is {localHash}.";
-
-            VWorld.Log.LogWarning(message);
-            if (!VShare.TryInvalidateCachedEntry(fileName, pluginName, isZip, true, out string invalidateError))
+            VWorld.Log.LogWarning(validationError);
+            bool invalidated = false;
+            if (validationError.Contains("digest mismatch", StringComparison.OrdinalIgnoreCase) &&
+                !VShare.TryInvalidateCachedEntry(fileName, pluginName, isZip, true, out string invalidateError))
             {
                 VWorld.Log.LogError($"Cache invalidation failed for {fileName}: {invalidateError}");
             }
+            else if (validationError.Contains("digest mismatch", StringComparison.OrdinalIgnoreCase))
+            {
+                invalidated = true;
+            }
 
+            string retryMessage = invalidated
+                ? " Cache entry was invalidated. Please re-download the release asset from GitHub and try again."
+                : " Please retry later.";
             SendTransferFailureMessage(
                 target,
-                $"{message} Cache entry was invalidated. Please re-download the release asset from GitHub and try again.");
-            onComplete(new ReleaseDigestVerificationResult(true, digestResult.Digest, digestResult.Tag, []));
-            yield break;
-        }
-
-        if (!TryConvertHexStringToBytes(digestResult.Digest, out byte[] hashBytes))
-        {
-            VWorld.Log.LogWarning($"GitHub Release asset digest for {pluginName} was not a valid hex string.");
-            SendTransferFailureMessage(
-                target,
-                $"Transfer aborted: GitHub Release asset digest for {pluginName} was not a valid hex string. Please retry later.");
+                $"{validationError}{retryMessage}");
             onComplete(new ReleaseDigestVerificationResult(true, digestResult.Digest, digestResult.Tag, []));
             yield break;
         }
@@ -4044,44 +4238,35 @@ internal static class Transference
 
             string fileName = Path.GetFileName(modFile);
             string baseName = Path.GetFileNameWithoutExtension(fileName);
-            string metadataBaseName = GetShareMetadataBaseNameFromStagedFileName(fileName);
-            IReadOnlyList<string> metadataKeys = GetShareMetadataKeys(baseName, metadataBaseName);
             bool isZip = fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
 
-            if (TryResolveLocalShareDigest(metadataKeys, out string localDigest, out _, out bool localDigestConfigured, out string localDigestError))
+            byte[] rawBytes;
+            try
             {
-                entries.Add(new SharedModEntry(fileName, baseName, metadataBaseName, localDigest, isZip));
+                rawBytes = File.ReadAllBytes(modFile);
+            }
+            catch (IOException ex)
+            {
+                VWorld.Log.LogWarning($"Skipping shared mod {fileName}: unable to read staged bytes for provenance verification: {ex.Message}");
                 continue;
             }
 
-            if (localDigestConfigured)
+            if (!TryResolveStagedReleaseProvenance(
+                    fileName,
+                    rawBytes,
+                    out StagedReleaseProvenance provenance,
+                    out string provenanceError))
             {
-                VWorld.Log.LogWarning($"Skipping shared mod {fileName}: {localDigestError}");
+                VWorld.Log.LogWarning($"Skipping shared mod {fileName}: {provenanceError}");
                 continue;
             }
 
-            if (!TryResolveGitHubReleaseIdentity(
-                    baseName,
-                    out GitHubReleaseClient.GitHubReleaseIdentity identity,
-                    out string identityError))
-            {
-                VWorld.Log.LogWarning($"Skipping shared mod {fileName}: {identityError}");
-                continue;
-            }
-
-            if (!TryResolveReleaseAssetDigest(identity, fileName, out string digest, out string digestError))
-            {
-                VWorld.Log.LogWarning($"Skipping shared mod {fileName}: {digestError}");
-                continue;
-            }
-
-            if (!TryConvertHexStringToBytes(digest, out _))
-            {
-                VWorld.Log.LogWarning($"Skipping shared mod {fileName}: GitHub Release asset digest was not valid hex.");
-                continue;
-            }
-
-            entries.Add(new SharedModEntry(fileName, baseName, identity.Repo, digest, isZip));
+            entries.Add(new SharedModEntry(
+                fileName,
+                baseName,
+                provenance.Identity.MetadataKey,
+                provenance.LocalSha256,
+                isZip));
         }
 
         return entries;

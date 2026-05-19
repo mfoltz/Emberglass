@@ -83,7 +83,13 @@ public sealed class GitHubReleaseClient
     /// <summary>
     /// Represents the outcome of a GitHub Release asset digest lookup.
     /// </summary>
-    public readonly record struct GitHubReleaseDigestResult(bool IsSuccess, string Digest, string Tag, string ErrorMessage)
+    public readonly record struct GitHubReleaseDigestResult(
+        bool IsSuccess,
+        string Digest,
+        string Tag,
+        string AssetName,
+        string DownloadUrl,
+        string ErrorMessage)
     {
         /// <summary>
         /// Creates a success result with the specified digest and tag.
@@ -91,8 +97,12 @@ public sealed class GitHubReleaseClient
         /// <param name="digest">The asset digest.</param>
         /// <param name="tag">The release tag.</param>
         /// <returns>A success result.</returns>
-        public static GitHubReleaseDigestResult Success(string digest, string tag) =>
-            new(true, digest, tag, string.Empty);
+        public static GitHubReleaseDigestResult Success(
+            string digest,
+            string tag,
+            string assetName,
+            string downloadUrl) =>
+            new(true, digest, tag, assetName, downloadUrl, string.Empty);
 
         /// <summary>
         /// Creates a failure result with the specified tag and error message.
@@ -101,7 +111,7 @@ public sealed class GitHubReleaseClient
         /// <param name="errorMessage">The failure description.</param>
         /// <returns>A failure result.</returns>
         public static GitHubReleaseDigestResult Failure(string tag, string errorMessage) =>
-            new(false, string.Empty, tag, errorMessage);
+            new(false, string.Empty, tag, string.Empty, string.Empty, errorMessage);
     }
 
     GitHubReleaseDigestResult ExecuteReleaseAssetDigestLookup(
@@ -169,7 +179,11 @@ public sealed class GitHubReleaseClient
                 return GitHubReleaseDigestResult.Failure(identity.Tag, digestError);
             }
 
-            var result = GitHubReleaseDigestResult.Success(digest, identity.Tag);
+            var result = GitHubReleaseDigestResult.Success(
+                digest,
+                identity.Tag,
+                matchedAsset.Name,
+                matchedAsset.BrowserDownloadUrl);
             CacheDigest(identity, assetFileName, result);
             return result;
         }
@@ -251,7 +265,11 @@ public sealed class GitHubReleaseClient
             if (_digestCache.TryGetValue(key, out ReleaseCacheEntry entry) &&
                 DateTimeOffset.UtcNow <= entry.ExpiresAt)
             {
-                result = GitHubReleaseDigestResult.Success(entry.Digest, entry.Tag);
+                result = GitHubReleaseDigestResult.Success(
+                    entry.Digest,
+                    entry.Tag,
+                    entry.AssetName,
+                    entry.DownloadUrl);
                 return true;
             }
         }
@@ -268,7 +286,12 @@ public sealed class GitHubReleaseClient
         }
 
         var key = new ReleaseCacheKey(identity.Owner, identity.Repo, identity.Tag, assetFileName);
-        var entry = new ReleaseCacheEntry(result.Digest, result.Tag, DateTimeOffset.UtcNow.Add(_cacheTtl));
+        var entry = new ReleaseCacheEntry(
+            result.Digest,
+            result.Tag,
+            result.AssetName,
+            result.DownloadUrl,
+            DateTimeOffset.UtcNow.Add(_cacheTtl));
         lock (_cacheLock)
         {
             _digestCache[key] = entry;
@@ -276,7 +299,12 @@ public sealed class GitHubReleaseClient
     }
 
     record struct ReleaseCacheKey(string Owner, string Repo, string Tag, string AssetName);
-    record struct ReleaseCacheEntry(string Digest, string Tag, DateTimeOffset ExpiresAt);
+    record struct ReleaseCacheEntry(
+        string Digest,
+        string Tag,
+        string AssetName,
+        string DownloadUrl,
+        DateTimeOffset ExpiresAt);
 
     sealed class GitHubReleaseResponse
     {
@@ -294,5 +322,8 @@ public sealed class GitHubReleaseClient
 
         [JsonPropertyName("sha256")]
         public string Sha256 { get; init; } = string.Empty;
+
+        [JsonPropertyName("browser_download_url")]
+        public string BrowserDownloadUrl { get; init; } = string.Empty;
     }
 }
