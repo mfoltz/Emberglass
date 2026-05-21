@@ -232,13 +232,14 @@ internal sealed class ButtonEntry(string id, LocalizationKey nameKey, Localizati
     /// <inheritdoc />
     public void BuildUI(OptionsPanel_Interface panel)
     {
-        if (OptionsMenuPatches.ButtonPrefab == null)
+        SettingsEntry_Button buttonPrefab = OptionsMenuPatches.ResolveButtonPrefab(panel);
+        if (buttonPrefab == null)
         {
             VWorld.Log.LogWarning($"ButtonEntry '{Id}': Button prefab is null!");
             return;
         }
 
-        SettingsEntry_Button buttonEntry = UIHelper.InstantiatePrefabUnderAnchor(OptionsMenuPatches.ButtonPrefab, panel.ContentNode);
+        SettingsEntry_Button buttonEntry = UIHelper.InstantiatePrefabUnderAnchor(buttonPrefab, panel.ContentNode);
 
         buttonEntry.Initialize(
             NameKey,

@@ -63,6 +63,12 @@ jobs:
           echo "ALLOWED_TAG_PATTERN=$allowed_tag_pattern" >> "$GITHUB_ENV"
           echo "ALLOWED_PACKAGE_VERSION_PATTERN=$allowed_package_version_pattern" >> "$GITHUB_ENV"
 
+      - name: Preserve release helper scripts
+        shell: bash
+        run: |
+          cp .codex/scripts/prerelease-notes.sh "$RUNNER_TEMP/prerelease-notes.sh"
+          chmod +x "$RUNNER_TEMP/prerelease-notes.sh"
+
       - name: Checkout selected release tag
         shell: bash
         run: git checkout --detach "refs/tags/$RELEASE_TAG"
@@ -116,6 +122,18 @@ jobs:
           done
 
           cp thunderstore.toml "$publish_root/thunderstore.toml"
+
+      - name: Validate staged release changelog
+        shell: bash
+        run: |
+          bash "$RUNNER_TEMP/prerelease-notes.sh" \
+            --changelog ./dist/thunderstore-publish/CHANGELOG.md \
+            --version "$PACKAGE_VERSION" \
+            --tag "$RELEASE_TAG" \
+            --check-only
+        env:
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+          PACKAGE_VERSION: ${{ env.PACKAGE_VERSION }}
 
       - name: Install Thunderstore CLI
         run: dotnet tool install --global tcli

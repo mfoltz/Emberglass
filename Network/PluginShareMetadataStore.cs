@@ -132,10 +132,12 @@ internal sealed class PluginShareMetadataStore
     public readonly record struct PluginShareMetadata(
         string GitHubRepo,
         string GitHubTag,
+        string GitHubAssetName,
         bool ClientSafe,
         bool HotloadAllowed,
         IReadOnlyList<string> Tags,
-        IReadOnlyList<string> Categories);
+        IReadOnlyList<string> Categories,
+        string LocalSha256);
 
     sealed class PluginShareMetadataPayload
     {
@@ -146,18 +148,22 @@ internal sealed class PluginShareMetadataStore
     {
         public string GitHubRepo { get; set; } = string.Empty;
         public string GitHubTag { get; set; } = string.Empty;
+        public string GitHubAssetName { get; set; } = string.Empty;
         public bool ClientSafe { get; set; }
         public bool HotloadAllowed { get; set; }
         public List<string> Tags { get; set; } = [];
         public List<string> Categories { get; set; } = [];
+        public string LocalSha256 { get; set; } = string.Empty;
 
         public PluginShareMetadata ToMetadata()
             => new(
                 GitHubRepo ?? string.Empty,
                 GitHubTag ?? string.Empty,
+                GitHubAssetName ?? string.Empty,
                 ClientSafe,
                 HotloadAllowed,
                 Tags ?? [],
-                Categories ?? []);
+                Categories ?? [],
+                LocalSha256 ?? string.Empty);
     }
 }

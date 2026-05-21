@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## v0.3.0
+
+- Added a VShare provenance ladder with metadata-first GitHub release identity, required release digest checks for clientbound sharing, strict local preflight receipts, and GitHub Actions artifact attestations for Emberglass DLL release jobs.
+- Made VShare transfer logs quieter and easier to follow, with info-level offer/download/load receipts and coarse digest-verified progress milestones.
+
+## v0.2.1
+
+- Added generated GitHub prerelease notes and staged Thunderstore changelog validation for release handoff.
+
+## v0.2.0
+
+- Made the shared-mod request button act as the consent boundary for initial VShare demos, auto-accepting eligible clientbound offers received in the request window.
+- Added configurable VShare transfer throttling for per-frame work budget, per-frame work steps, and active outgoing transfer limits.
+- Queued accepted outgoing transfers fairly when the active transfer limit is reached, reducing server hitch risk during shared-mod delivery.
+- Added local staged-DLL digest support for runtime proof flows without requiring a temporary GitHub prerelease.
+
 ## v0.1.6
 
 - Hardened VShare runtime hotload loading with explicit success/failure receipts, already-loaded assembly guards, duplicate plugin GUID detection, and repo-name metadata key fallback.

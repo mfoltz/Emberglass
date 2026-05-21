@@ -34,7 +34,7 @@ internal static class OptionsMenuPatches
 
     static OptionsMenu _optionsMenu;
     internal static SettingsEntry_Button ButtonPrefab
-        => _optionsMenu?.GraphicsPanel?.ButtonPrefab;
+        => _optionsMenu?.ControlsPanel?.ButtonPrefab ?? _optionsMenu?.GraphicsPanel?.ButtonPrefab;
 
     [HarmonyPatch(typeof(OptionsMenu_Base), nameof(OptionsMenu_Base.OnDestroy))]
     [HarmonyPostfix]
@@ -48,6 +48,19 @@ internal static class OptionsMenuPatches
     static void UpdatePostfix(OptionsMenu __instance)
     {
         _optionsMenu = __instance;
+    }
+
+    [HarmonyPatch(typeof(OptionsMenu), nameof(OptionsMenu.Start))]
+    [HarmonyPostfix]
+    static void StartPostfix(OptionsMenu __instance)
+    {
+        _optionsMenu = __instance;
+    }
+
+    internal static SettingsEntry_Button ResolveButtonPrefab(OptionsPanel_Interface panel)
+    {
+        _optionsMenu ??= panel.GetComponentInParent<OptionsMenu>();
+        return ButtonPrefab;
     }
 
     [HarmonyPatch(typeof(OptionsPanel_Interface), nameof(OptionsPanel_Interface.Start))]

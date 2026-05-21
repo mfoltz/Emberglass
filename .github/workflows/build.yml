@@ -225,6 +225,8 @@ jobs:
       github.ref == 'refs/heads/main'
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     runs-on: ubuntu-latest
 
     steps:
@@ -259,15 +261,27 @@ jobs:
             --no-restore \
             -p:Version="$version"
 
+      - name: Prepare prerelease notes
+        shell: bash
+        run: |
+          bash .codex/scripts/prerelease-notes.sh \
+            --version '${{ needs.prepare_prerelease.outputs.prerelease_version }}' \
+            --tag '${{ needs.prepare_prerelease.outputs.prerelease_tag }}' \
+            --branch '${{ github.ref_name }}' \
+            --commit '${{ github.sha }}' \
+            --run-id '${{ github.run_id }}' \
+            --output ./dist/prerelease-notes.md
+
+      - name: Attest prerelease artifact
+        uses: actions/attest@v4
+        with:
+          subject-path: ./bin/Release/net6.0/Emberglass.dll
+
       - name: GH Release (pre-release)
         uses: softprops/action-gh-release@v2.6.2
         if: needs.prepare_prerelease.outputs.prerelease_version != ''
         with:
-          body: |
-            Automated pre-release for version ${{ needs.prepare_prerelease.outputs.prerelease_version }} generated from the main branch.
-            - Branch: ${{ github.ref_name }}
-            - Commit: ${{ github.sha }}
-            - Run: ${{ github.run_id }}
+          body_path: ./dist/prerelease-notes.md
           name: ${{ needs.prepare_prerelease.outputs.prerelease_name }}
           fail_on_unmatched_files: true
           prerelease: true
@@ -323,6 +337,8 @@ jobs:
       github.ref == 'refs/heads/codex/feature-testing'
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     runs-on: ubuntu-latest
 
     steps:
@@ -352,6 +368,11 @@ jobs:
             --configuration Release \
             --no-restore \
             -p:Version="$feature_testing_version"
+
+      - name: Attest feature-testing artifact
+        uses: actions/attest@v4
+        with:
+          subject-path: ./bin/Release/net6.0/Emberglass.dll
 
       - name: GH Release (feature-testing snapshot)
         uses: softprops/action-gh-release@v2.6.2
