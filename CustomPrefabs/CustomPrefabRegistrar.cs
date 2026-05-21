@@ -51,9 +51,16 @@ internal sealed class CustomPrefabRegistrar
         CustomPrefabRegistration registration,
         bool recordManifest,
         out string reason)
+        => TryRegister(registration, recordManifest, logMissingSources: true, out reason);
+
+    public bool TryRegister(
+        CustomPrefabRegistration registration,
+        bool recordManifest,
+        bool logMissingSources,
+        out string reason)
     {
         Dictionary<int, Entity> prefabsByGuid = GatherSourcePrefabs(new[] { registration.SourcePrefabGuid });
-        return TryRegister(registration, prefabsByGuid, recordManifest, logMissingSources: true, out reason);
+        return TryRegister(registration, prefabsByGuid, recordManifest, logMissingSources, out reason);
     }
 
     static Dictionary<int, Entity> GatherSourcePrefabs(IEnumerable<int> sourcePrefabGuids)

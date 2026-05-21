@@ -8,6 +8,7 @@ public sealed class CustomPrefabRegistrationSystem : SystemBase
 {
     bool _ran;
     int _attempts;
+    readonly HashSet<int> _registeredGeneratedPrefabGuids = [];
 
     public override void OnCreate()
     {
@@ -25,21 +26,44 @@ public sealed class CustomPrefabRegistrationSystem : SystemBase
         try
         {
             _attempts++;
-            int activeRegistrationCount = CustomPrefabRegistry.ActiveRegistrations.Count;
+            IReadOnlyList<CustomPrefabRegistration> activeRegistrations = CustomPrefabRegistry.ActiveRegistrations;
+            int activeRegistrationCount = activeRegistrations.Count;
             CustomPrefabRegistrar registrar = new(CustomPrefabManifestStore.Default);
-            int registeredCount = registrar.RegisterActiveServerPrefabs(logMissingSources: false);
+            int registeredCount = 0;
+
+            foreach (CustomPrefabRegistration registration in activeRegistrations)
+            {
+                if (_registeredGeneratedPrefabGuids.Contains(registration.GeneratedPrefabGuid))
+                {
+                    continue;
+                }
+
+                if (registrar.TryRegister(
+                    registration,
+                    recordManifest: true,
+                    logMissingSources: false,
+                    out _))
+                {
+                    _registeredGeneratedPrefabGuids.Add(registration.GeneratedPrefabGuid);
+                    registeredCount++;
+                }
+            }
+
+            int completedRegistrationCount = activeRegistrations.Count(
+                registration => _registeredGeneratedPrefabGuids.Contains(registration.GeneratedPrefabGuid));
+
             if (registeredCount > 0)
             {
                 VWorld.Log.LogInfo($"[CustomPrefabs] Registered {registeredCount} active custom prefab definition(s).");
             }
 
-            if (!ShouldDisableAfterAttempt(activeRegistrationCount, registeredCount)
+            if (!ShouldDisableAfterAttempt(activeRegistrationCount, completedRegistrationCount)
                 && (_attempts == 1 || _attempts % 300 == 0))
             {
                 VWorld.Log.LogInfo($"[CustomPrefabs] Waiting for source prefab availability; activeRegistrations={activeRegistrationCount}, attempts={_attempts}.");
             }
 
-            _ran = ShouldDisableAfterAttempt(activeRegistrationCount, registeredCount);
+            _ran = ShouldDisableAfterAttempt(activeRegistrationCount, completedRegistrationCount);
         }
         catch (Exception ex)
         {
@@ -53,5 +77,5 @@ public sealed class CustomPrefabRegistrationSystem : SystemBase
     }
 
     internal static bool ShouldDisableAfterAttempt(int activeRegistrationCount, int registeredCount)
-        => activeRegistrationCount == 0 || registeredCount > 0;
+        => activeRegistrationCount == 0 || registeredCount >= activeRegistrationCount;
 }

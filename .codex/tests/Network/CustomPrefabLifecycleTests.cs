@@ -288,10 +288,34 @@ public sealed class CustomPrefabLifecycleTests
         Assert.True(Options.HasFlag(EntityQueryOptions.IncludeDisabled));
     }
 
+    [Fact]
+    public void ManifestStore_InvalidJsonReturnsEmptyManifest()
+    {
+        string ManifestPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(ManifestPath, "{ invalid json");
+            CustomPrefabManifestStore Store = new(ManifestPath);
+
+            CustomPrefabManifest Manifest = Store.Load();
+
+            Assert.Empty(Manifest.Entries);
+        }
+        finally
+        {
+            if (File.Exists(ManifestPath))
+            {
+                File.Delete(ManifestPath);
+            }
+        }
+    }
+
     [Theory]
     [InlineData(0, 0, true)]
     [InlineData(1, 0, false)]
     [InlineData(1, 1, true)]
+    [InlineData(2, 1, false)]
+    [InlineData(2, 2, true)]
     public void RegistrationSystem_DisablesOnlyWhenThereIsNoWorkOrRegistrationSucceeded(
         int activeRegistrationCount,
         int registeredCount,
@@ -300,6 +324,22 @@ public sealed class CustomPrefabLifecycleTests
         Assert.Equal(
             expectedShouldDisable,
             CustomPrefabRegistrationSystem.ShouldDisableAfterAttempt(activeRegistrationCount, registeredCount));
+    }
+
+    [Theory]
+    [InlineData("source prefab missing", 1, 20, true)]
+    [InlineData("converted asset data missing", 5, 20, true)]
+    [InlineData("source prefab missing", 20, 20, false)]
+    [InlineData("generated ids do not match deterministic Emberglass ids", 1, 20, false)]
+    public void MirrorCoordinator_RetriesOnlyTransientClientSourceAvailabilityFailures(
+        string reason,
+        int attempt,
+        int maxAttempts,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            CustomPrefabMirrorCoordinator.ShouldRetryClientMirrorRegistration(reason, attempt, maxAttempts));
     }
 
     [Theory]

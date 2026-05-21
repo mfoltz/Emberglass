@@ -1,10 +1,15 @@
 using Emberglass.API.Shared;
 using ProjectM.Network;
+using System.Collections;
+using UnityEngine;
 
 namespace Emberglass.CustomPrefabs;
 
 internal static class CustomPrefabMirrorCoordinator
 {
+    internal const int ClientMirrorRegistrationMaxAttempts = 20;
+    internal const float ClientMirrorRegistrationRetryDelaySeconds = 0.5f;
+
     static readonly object Gate = new();
     static readonly Dictionary<(ulong PlatformId, int GeneratedPrefabGuid), CustomPrefabMirrorAckReceipt> AckReceipts = [];
     static bool _initialized;
@@ -174,17 +179,47 @@ internal static class CustomPrefabMirrorCoordinator
             return;
         }
 
-        try
+        RegisterMirrorRecipeWithRetry(registration).Run();
+    }
+
+    static IEnumerator RegisterMirrorRecipeWithRetry(CustomPrefabRegistration registration)
+    {
+        for (int attempt = 1; attempt <= ClientMirrorRegistrationMaxAttempts; attempt++)
         {
-            CustomPrefabRegistrar registrar = new(CustomPrefabManifestStore.Default);
-            bool registered = registrar.TryRegister(registration, recordManifest: false, out reason);
-            SendAck(registration.ProviderId, registration.GeneratedPrefabGuid, registered, reason);
-        }
-        catch (Exception ex)
-        {
-            SendAck(registration.ProviderId, registration.GeneratedPrefabGuid, false, ex.GetType().Name);
+            try
+            {
+                CustomPrefabRegistrar registrar = new(CustomPrefabManifestStore.Default);
+                if (registrar.TryRegister(registration, recordManifest: false, out string reason))
+                {
+                    SendAck(registration.ProviderId, registration.GeneratedPrefabGuid, true, reason);
+                    yield break;
+                }
+
+                if (!ShouldRetryClientMirrorRegistration(reason, attempt, ClientMirrorRegistrationMaxAttempts))
+                {
+                    SendAck(registration.ProviderId, registration.GeneratedPrefabGuid, false, reason);
+                    yield break;
+                }
+
+                if (attempt == 1 || attempt % 5 == 0)
+                {
+                    VWorld.Log.LogInfo($"[CustomPrefabs] Waiting for client mirror source availability; provider={registration.ProviderId}, generatedPrefabGuid={registration.GeneratedPrefabGuid}, attempts={attempt}.");
+                }
+            }
+            catch (Exception ex)
+            {
+                SendAck(registration.ProviderId, registration.GeneratedPrefabGuid, false, ex.GetType().Name);
+                yield break;
+            }
+
+            yield return new WaitForSeconds(ClientMirrorRegistrationRetryDelaySeconds);
         }
     }
+
+    internal static bool ShouldRetryClientMirrorRegistration(string reason, int attempt, int maxAttempts)
+        => attempt < maxAttempts
+            && (string.Equals(reason, "source prefab missing", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(reason, "converted asset data missing", StringComparison.OrdinalIgnoreCase));
 
     static void OnMirrorAck(User sender, CustomPrefabMirrorAckPacket packet)
     {

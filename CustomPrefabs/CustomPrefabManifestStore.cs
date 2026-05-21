@@ -43,13 +43,20 @@ internal sealed class CustomPrefabManifestStore
 
     public CustomPrefabManifest Load()
     {
-        if (!File.Exists(_manifestPath))
+        try
+        {
+            if (!File.Exists(_manifestPath))
+            {
+                return new();
+            }
+
+            string json = File.ReadAllText(_manifestPath);
+            return JsonSerializer.Deserialize<CustomPrefabManifest>(json, JsonOptions) ?? new();
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
             return new();
         }
-
-        string json = File.ReadAllText(_manifestPath);
-        return JsonSerializer.Deserialize<CustomPrefabManifest>(json, JsonOptions) ?? new();
     }
 
     public void RecordRegistration(CustomPrefabRegistration registration)
