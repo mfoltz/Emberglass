@@ -1,0 +1,32 @@
+{
+  "startedAt": "2026-05-20T16:32:10.6358914-05:00",
+  "profile": "emberglass-quip-signal-server",
+  "status": "stopped",
+  "processId": 41260,
+  "runRoot": "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\20260520-163159",
+  "runDirectory": "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\20260520-163159\\emberglass-quip-signal-server",
+  "serverLogPath": "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\20260520-163159\\emberglass-quip-signal-server\\logs\\VRisingServer.log",
+  "persistentDataPath": "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\persistent-data\\20260520-163159\\emberglass-quip-signal-server",
+  "runtimeConnection": {
+    "host": "127.0.0.1",
+    "gamePort": 28015,
+    "queryPort": 28016,
+    "connectionAddress": "127.0.0.1:28015"
+  },
+  "paths": {
+    "serverInstallPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex",
+    "clientInstallPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingCodex",
+    "builtDllPath": "C:\\Users\\mitch\\source\\Repos\\Emberglass\\bin\\Release\\net6.0\\Emberglass.dll",
+    "deployedDllPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\plugins\\Emberglass.dll",
+    "clientDeployedDllPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingCodex\\BepInEx\\plugins\\Emberglass.dll",
+    "saveName": "emberglass-quip-signal-server-20260520-163159"
+  },
+  "diagnostics": {
+    "clientCopyStatus": "ok",
+    "probeMode": "ClientPulseOnly",
+    "readyMarkersObserved": true,
+    "finalBuild": "EnableQuipSignalProbe=true"
+  },
+  "timestamp": "20260520-163159",
+  "stoppedAt": "2026-05-20T16:36:58.3248625-05:00"
+}

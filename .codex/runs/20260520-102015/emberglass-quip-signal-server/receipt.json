@@ -1,0 +1,109 @@
+﻿{
+    "profile":  "emberglass-quip-signal-server",
+    "modId":  "emberglass",
+    "pluginName":  "Emberglass",
+    "status":  "stopped",
+    "dryRun":  false,
+    "timestamp":  "20260520-102015",
+    "startedAt":  "2026-05-20T10:20:18.2812680-05:00",
+    "finishedAt":  "2026-05-20T11:45:53.3714631-05:00",
+    "runtimeConnection":  {
+                              "host":  "127.0.0.1",
+                              "gamePort":  28015,
+                              "queryPort":  28016,
+                              "serverName":  "Codex Emberglass Quip Signal",
+                              "password":  null,
+                              "connectionAddress":  "127.0.0.1:28015"
+                          },
+    "paths":  {
+                  "saveName":  "emberglass-quip-signal-server-20260520-102015",
+                  "builtDllPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\bin\\Release\\net6.0\\Emberglass.dll",
+                  "pluginDir":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\plugins",
+                  "serverInstallPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex",
+                  "pluginInventory":  [
+                                          "Emberglass.dll",
+                                          "NetTopologySuite.dll",
+                                          "VampireCommandFramework.dll"
+                                      ],
+                  "deployedDllPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\plugins\\Emberglass.dll",
+                  "serverLogPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\20260520-102015\\emberglass-quip-signal-server\\logs\\VRisingServer.log",
+                  "serverExePath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\VRisingServer.exe",
+                  "persistentDataPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\persistent-data\\20260520-102015\\emberglass-quip-signal-server",
+                  "lockPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\.codex-harness-lock.json",
+                  "primaryInstallPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServer"
+              },
+    "markerMatches":  {
+                          "failure":  [
+
+                                      ],
+                          "success":  [
+                                          "\\[Info\\s+:\\s+BepInEx\\]\\s+Loading \\[Emberglass [^\\]]+\\]",
+                                          "\\[Info\\s+:\\s*Emberglass\\]\\s+\\[QuipSignalProbe\\] initialized;",
+                                          "\\[Info\\s+:\\s*Emberglass\\]\\s+\\[QuipSignalProbe\\] server system registered;"
+                                      ]
+                      },
+    "diagnostics":  {
+                        "startupFailure":  {
+                                               "evidence":  null,
+                                               "recommendedNextAction":  null,
+                                               "failureClass":  null
+                                           }
+                    },
+    "actionResults":  [
+                          {
+                              "action":  "preflight",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T10:20:16.4021641-05:00",
+                              "details":  {
+                                              "lockPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\.codex-harness-lock.json",
+                                              "serverInstallPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex",
+                                              "sharedInstallStatus":  "exclusive-owner-acquired"
+                                          }
+                          },
+                          {
+                              "action":  "build",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T10:20:18.1049009-05:00",
+                              "details":  {
+                                              "builtDllPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\bin\\Release\\net6.0\\Emberglass.dll"
+                                          }
+                          },
+                          {
+                              "action":  "deploy",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T10:20:18.1630374-05:00",
+                              "details":  {
+                                              "pluginDir":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\plugins"
+                                          }
+                          },
+                          {
+                              "action":  "start",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T10:20:18.3304035-05:00",
+                              "details":  {
+                                              "processId":  56040
+                                          }
+                          },
+                          {
+                              "action":  "wait-ready",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T10:21:00.4088176-05:00",
+                              "details":  {
+                                              "markers":  [
+                                                              "\\[Info\\s+:\\s+BepInEx\\]\\s+Loading \\[Emberglass [^\\]]+\\]",
+                                                              "\\[Info\\s+:\\s*Emberglass\\]\\s+\\[QuipSignalProbe\\] initialized;",
+                                                              "\\[Info\\s+:\\s*Emberglass\\]\\s+\\[QuipSignalProbe\\] server system registered;"
+                                                          ]
+                                          }
+                          },
+                          {
+                              "action":  "stop",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T11:45:53.3694701-05:00",
+                              "details":  {
+                                              "processId":  56040
+                                          }
+                          }
+                      ],
+    "errorMessage":  null
+}

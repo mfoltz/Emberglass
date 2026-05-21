@@ -1,0 +1,23 @@
+{
+  "schema": "bepinex-plugin-set-proof.v1",
+  "runId": "20260520-174616",
+  "profileLabel": "vshare-provenance-server",
+  "targetRole": "server",
+  "createdAtUtc": "2026-05-20T22:46:16.2558043Z",
+  "repository": "C:\\Users\\mitch\\source\\Repos\\Emberglass",
+  "gitCommit": "9e986c55db9b58ffdd186b09e16f1f6da7756e85",
+  "stagedPluginDirectory": "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\bepinex-plugin-set\\vshare-provenance-server\\server\\20260520-174616\\stage\\BepInEx\\plugins",
+  "configOverrides": [],
+  "artifacts": [
+    {
+      "name": "Emberglass",
+      "sourcePath": "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\bepinex-plugin-set\\vshare-provenance-client\\client\\20260519-094421\\stage\\BepInEx\\plugins\\Emberglass.dll",
+      "stagedPath": "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\bepinex-plugin-set\\vshare-provenance-server\\server\\20260520-174616\\stage\\BepInEx\\plugins\\Emberglass.dll",
+      "sha256": "904ACF822A6891AB0AB5C548EBF65BFF892C1CF632B4347DAD834F5055DC50E0",
+      "length": 2098688,
+      "lastWriteTimeUtc": "2026-05-19T13:40:40.1854259Z"
+    }
+  ],
+  "result": "not-run",
+  "resultNotes": "Staging receipt only. Install this plugin set into an isolated BepInEx profile, then collect logs into this run directory."
+}

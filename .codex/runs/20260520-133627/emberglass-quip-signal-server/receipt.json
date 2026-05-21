@@ -1,0 +1,101 @@
+﻿{
+    "profile":  "emberglass-quip-signal-server",
+    "modId":  "emberglass",
+    "pluginName":  "Emberglass",
+    "status":  "ready",
+    "dryRun":  false,
+    "timestamp":  "20260520-133627",
+    "startedAt":  "2026-05-20T13:36:30.0504918-05:00",
+    "finishedAt":  null,
+    "runtimeConnection":  {
+                              "host":  "127.0.0.1",
+                              "gamePort":  28015,
+                              "queryPort":  28016,
+                              "serverName":  "Codex Emberglass Quip Signal",
+                              "password":  null,
+                              "connectionAddress":  "127.0.0.1:28015"
+                          },
+    "paths":  {
+                  "serverExePath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\VRisingServer.exe",
+                  "builtDllPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\bin\\Release\\net6.0\\Emberglass.dll",
+                  "pluginDir":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\plugins",
+                  "serverLogPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\20260520-133627\\emberglass-quip-signal-server\\logs\\VRisingServer.log",
+                  "primaryInstallPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServer",
+                  "serverInstallPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex",
+                  "saveName":  "emberglass-quip-signal-server-20260520-133627",
+                  "pluginInventory":  [
+                                          "Emberglass.dll",
+                                          "NetTopologySuite.dll",
+                                          "VampireCommandFramework.dll"
+                                      ],
+                  "persistentDataPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\persistent-data\\20260520-133627\\emberglass-quip-signal-server",
+                  "deployedDllPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\plugins\\Emberglass.dll",
+                  "lockPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\.codex-harness-lock.json"
+              },
+    "markerMatches":  {
+                          "failure":  [
+
+                                      ],
+                          "success":  [
+                                          "\\[Info\\s+:\\s+BepInEx\\]\\s+Loading \\[Emberglass [^\\]]+\\]",
+                                          "\\[Info\\s+:\\s*Emberglass\\]\\s+\\[QuipSignalProbe\\] initialized;",
+                                          "\\[Info\\s+:\\s*Emberglass\\]\\s+\\[QuipSignalProbe\\] server system registered;"
+                                      ]
+                      },
+    "diagnostics":  {
+                        "startupFailure":  {
+                                               "evidence":  null,
+                                               "recommendedNextAction":  null,
+                                               "failureClass":  null
+                                           }
+                    },
+    "actionResults":  [
+                          {
+                              "action":  "preflight",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T13:36:28.3620238-05:00",
+                              "details":  {
+                                              "lockPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\.codex-harness-lock.json",
+                                              "serverInstallPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex",
+                                              "sharedInstallStatus":  "exclusive-owner-acquired"
+                                          }
+                          },
+                          {
+                              "action":  "build",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T13:36:29.9081414-05:00",
+                              "details":  {
+                                              "builtDllPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\bin\\Release\\net6.0\\Emberglass.dll"
+                                          }
+                          },
+                          {
+                              "action":  "deploy",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T13:36:29.9633296-05:00",
+                              "details":  {
+                                              "pluginDir":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\plugins"
+                                          }
+                          },
+                          {
+                              "action":  "start",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T13:36:30.0688692-05:00",
+                              "details":  {
+                                              "processId":  49232
+                                          }
+                          },
+                          {
+                              "action":  "wait-ready",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T13:36:40.2865518-05:00",
+                              "details":  {
+                                              "markers":  [
+                                                              "\\[Info\\s+:\\s+BepInEx\\]\\s+Loading \\[Emberglass [^\\]]+\\]",
+                                                              "\\[Info\\s+:\\s*Emberglass\\]\\s+\\[QuipSignalProbe\\] initialized;",
+                                                              "\\[Info\\s+:\\s*Emberglass\\]\\s+\\[QuipSignalProbe\\] server system registered;"
+                                                          ]
+                                          }
+                          }
+                      ],
+    "errorMessage":  null
+}

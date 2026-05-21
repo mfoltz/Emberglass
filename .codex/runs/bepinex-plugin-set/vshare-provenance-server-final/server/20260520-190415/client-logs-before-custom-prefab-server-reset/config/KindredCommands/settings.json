@@ -1,0 +1,13 @@
+{
+  "RevealMapToAll": false,
+  "BloodBound": {},
+  "HeadgearBloodbound": false,
+  "SoulshardsRestricted": true,
+  "ItemDropLifetime": 0,
+  "ItemDropLifetimeWhenDisabled": 300,
+  "ShardDropLifetime": 0,
+  "ShardDropManagementEnabled": true,
+  "ShardDropLimit": 1,
+  "BatVision": false,
+  "PrisonerFeeds": {}
+}

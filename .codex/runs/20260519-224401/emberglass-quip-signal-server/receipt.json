@@ -1,0 +1,69 @@
+﻿{
+    "profile":  "emberglass-quip-signal-server",
+    "modId":  "emberglass",
+    "pluginName":  "Emberglass",
+    "status":  "start-error",
+    "dryRun":  false,
+    "timestamp":  "20260519-224401",
+    "startedAt":  null,
+    "finishedAt":  "2026-05-19T22:44:03.1737185-05:00",
+    "runtimeConnection":  null,
+    "paths":  {
+                  "saveName":  "emberglass-quip-signal-server-20260519-224401",
+                  "builtDllPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\bin\\Release\\net6.0\\Emberglass.dll",
+                  "pluginDir":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\plugins",
+                  "serverInstallPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex",
+                  "pluginInventory":  [
+
+                                      ],
+                  "serverLogPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\20260519-224401\\emberglass-quip-signal-server\\logs\\VRisingServer.log",
+                  "serverExePath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\VRisingServer.exe",
+                  "persistentDataPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\persistent-data\\20260519-224401\\emberglass-quip-signal-server",
+                  "lockPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\.codex-harness-lock.json",
+                  "primaryInstallPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServer"
+              },
+    "markerMatches":  {
+                          "failure":  [
+
+                                      ],
+                          "success":  [
+
+                                      ]
+                      },
+    "diagnostics":  {
+                        "startupFailure":  {
+                                               "evidence":  "Loaded Emberglass 0.2.0 but expected 0.2.1.",
+                                               "recommendedNextAction":  "Confirm cleanupPlugins removes stale DLLs and redeploy the freshly built DLL to the Codex test install.",
+                                               "failureClass":  "stale-installed-dll"
+                                           }
+                    },
+    "actionResults":  [
+                          {
+                              "action":  "preflight",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-19T22:44:01.6268887-05:00",
+                              "details":  {
+                                              "lockPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\.codex-harness-lock.json",
+                                              "serverInstallPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex",
+                                              "sharedInstallStatus":  "exclusive-owner-acquired"
+                                          }
+                          },
+                          {
+                              "action":  "build",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-19T22:44:03.1466082-05:00",
+                              "details":  {
+                                              "builtDllPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\bin\\Release\\net6.0\\Emberglass.dll"
+                                          }
+                          },
+                          {
+                              "action":  "start",
+                              "status":  "error",
+                              "timestamp":  "2026-05-19T22:44:03.1737185-05:00",
+                              "details":  {
+                                              "message":  "The property \u0027source\u0027 cannot be found on this object. Verify that the property exists."
+                                          }
+                          }
+                      ],
+    "errorMessage":  "The property \u0027source\u0027 cannot be found on this object. Verify that the property exists."
+}

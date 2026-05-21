@@ -1,0 +1,17 @@
+﻿{
+    "Plugins":  {
+                    "Eclipse":  {
+                                    "GitHubRepo":  "mfoltz/Eclipse",
+                                    "GitHubTag":  "v1.3.16-pre",
+                                    "ClientSafe":  true,
+                                    "HotloadAllowed":  true,
+                                    "LocalSha256":  "2c2fdef47bcedb9b1d801ed5ebdfec786e60c0a5730289714c2147f833afbb72",
+                                    "Tags":  [
+                                                 "client"
+                                             ],
+                                    "Categories":  [
+
+                                                   ]
+                                }
+                }
+}

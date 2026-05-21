@@ -1,0 +1,6 @@
+{
+  "CHAR_VampireMale": "Enters a player with no string for name, causes some mods issues.",
+  "CHAR_Mount_Horse_Gloomrot": "it causes an instant server crash.",
+  "CHAR_Mount_Horse_Vampire": "it causes an instant server crash.",
+  "CHAR_Vampire_Ghost": "It is weird. Lets not."
+}
