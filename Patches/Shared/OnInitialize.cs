@@ -1,6 +1,7 @@
 using Emberglass.API.Client;
 using Emberglass.API.Server;
 using Emberglass.API.Shared;
+using Emberglass.CustomPrefabs;
 using Emberglass.Network;
 using Emberglass.Patches.Client;
 using Emberglass.Patches.Server;
@@ -20,6 +21,7 @@ internal static class GameBootstrapPatch
         {
             if (VWorld.IsServer)
             {
+                CustomPrefabBuiltInProofDefinitions.Register();
                 VWorld.Log.LogInfo("[GameBootstrapPatch] Registering server observer systems.");
                 ObserverSystemRegistry.RegisterAll();
                 VWorld.Log.LogInfo("[GameBootstrapPatch] Server observer registration returned.");
@@ -88,6 +90,8 @@ internal static class GameBootstrapPatch
         }
 
         RequestResponse.Uninitialize();
+        CustomPrefabProofBuffApplier.Uninitialize();
+        CustomPrefabMirrorCoordinator.Uninitialize();
 
         if (VWorld.IsServer)
         {
@@ -109,6 +113,7 @@ internal static class GameBootstrapPatch
         EnsureUnityBehaviourInitialized();
         VEvents.Initialize();
         API.Shared.VNetwork.Initialize();
+        CustomPrefabMirrorCoordinator.Initialize();
 
         if (VWorld.IsServer)
         {
@@ -122,6 +127,7 @@ internal static class GameBootstrapPatch
             VWorld.Log.LogInfo("[GameBootstrapPatch] Server-side runtime module initialization returned.");
             Players.Initialize();
             PlayerPresenceValidationProbe.Initialize();
+            CustomPrefabProofBuffApplier.Initialize();
         }
 
         if (VWorld.IsClient)

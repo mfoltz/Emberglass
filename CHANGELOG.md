@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.3.1
+
+- Added an internal custom-prefab lifecycle proof with deterministic prefab IDs, manifest-backed cleanup identity, early orphan cleanup/registration systems, and client mirror recipe acknowledgements.
+- Added the Blood Rage proof clone path with server-side edit-plan support and mirror-gated proof buff application for runtime validation.
+- Hardened custom-prefab startup behavior by retrying pending registrations, tolerating malformed manifests, and retrying transient client mirror source-availability failures.
+
 ## v0.3.0
 
 - Added a VShare provenance ladder with metadata-first GitHub release identity, required release digest checks for clientbound sharing, strict local preflight receipts, and GitHub Actions artifact attestations for Emberglass DLL release jobs.

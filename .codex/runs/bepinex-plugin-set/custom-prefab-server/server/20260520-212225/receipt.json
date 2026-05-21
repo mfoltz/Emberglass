@@ -1,0 +1,25 @@
+﻿{
+    "schema":  "bepinex-plugin-set-proof.v1",
+    "runId":  "20260520-212225",
+    "profileLabel":  "custom-prefab-server",
+    "targetRole":  "server",
+    "createdAtUtc":  "2026-05-21T02:22:25.9293107Z",
+    "repository":  "C:\\Users\\mitch\\source\\Repos\\Emberglass",
+    "gitCommit":  "c1b5fb186cd22d1b0e53418b721f826bc7ab1a35",
+    "stagedPluginDirectory":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\bepinex-plugin-set\\custom-prefab-server\\server\\20260520-212225\\stage\\BepInEx\\plugins",
+    "configOverrides":  [
+
+                        ],
+    "artifacts":  [
+                      {
+                          "name":  "Emberglass",
+                          "sourcePath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\bin\\Release\\net6.0\\Emberglass.dll",
+                          "stagedPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\bepinex-plugin-set\\custom-prefab-server\\server\\20260520-212225\\stage\\BepInEx\\plugins\\Emberglass.dll",
+                          "sha256":  "3ABCE59F5B3770303FEACF655E16F656B71FC234A256F8FE48FCCDFF058324A8",
+                          "length":  2103296,
+                          "lastWriteTimeUtc":  "2026-05-21T02:21:45.1513306Z"
+                      }
+                  ],
+    "result":  "not-run",
+    "resultNotes":  "Staging receipt only. Install this plugin set into an isolated BepInEx profile, then collect logs into this run directory."
+}

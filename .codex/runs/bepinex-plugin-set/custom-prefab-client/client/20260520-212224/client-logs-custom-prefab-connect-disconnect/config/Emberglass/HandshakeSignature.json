@@ -1,0 +1,14 @@
+{
+  "ServerPrivateKeyBase64": "",
+  "ServerPublicKeyBase64": "",
+  "ServerTrustId": "",
+  "TrustedServers": [
+    {
+      "ServerTrustId": "028b44163e7a470b802c1de3faaaac1d",
+      "ServerPublicKeyBase64": "42hx5IuOz8RXu9tlpQlDJxlGMR/5mcpbXrutGdf6jRyTLSHALER/r93OUoVRsQmriKfYzKOgLVHxlJ/yeeMSKw==",
+      "PublicKeyFingerprint": "E884E8F558B76B95D4F011FA679465872B57CB40B95BBE63775370EAF771E85F",
+      "FirstSeenUtc": "2026-05-21T02:37:22.7464632+00:00",
+      "LastSeenUtc": "2026-05-21T02:37:22.7465061+00:00"
+    }
+  ]
+}

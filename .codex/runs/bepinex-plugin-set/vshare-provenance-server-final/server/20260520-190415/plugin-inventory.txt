@@ -1,0 +1,1 @@
+Emberglass	18B63F88D85FF427C3E594A0291C8C71B9BCB5B98E26C22CDAEF5779BA669859	C:\Users\mitch\source\Repos\Emberglass\.codex\runs\bepinex-plugin-set\vshare-provenance-server-final\server\20260520-190415\stage\BepInEx\plugins\Emberglass.dll

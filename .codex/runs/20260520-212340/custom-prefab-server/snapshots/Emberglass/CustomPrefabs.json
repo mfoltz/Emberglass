@@ -1,0 +1,13 @@
+{
+  "Entries": [
+    {
+      "ProviderId": "emberglass.proof.blood-rage",
+      "SourcePrefabGuid": -491593410,
+      "GeneratedPrefabGuid": -1754501867,
+      "GeneratedAssetGuid": "5cd8d174c6436ec29e6b4b88d829aa3b",
+      "GeneratedAssetName": "AB_Blood_BloodRage_Buff_EmberglassProof",
+      "ClientSyncRequired": true,
+      "CleanupPolicy": "Destroy"
+    }
+  ]
+}

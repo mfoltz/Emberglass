@@ -1,0 +1,33 @@
+{
+  "status": "passed",
+  "generatedAtUtc": "2026-05-20T23:52:50.4580093Z",
+  "serverModsPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\config\\Server",
+  "shareMetadataPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\config\\Emberglass\\ShareMetadata.json",
+  "strictAttestation": false,
+  "assets": [
+    {
+      "status": "passed",
+      "level": "release-digest",
+      "stagedFileName": "Eclipse.dll",
+      "releaseAssetName": "Eclipse.dll",
+      "repository": "mfoltz/Eclipse",
+      "tag": "v1.3.17-pre",
+      "localSha256": "A14EC031C176C0C2A3167CDC48026009C081CA71F7CCFDC6F99E928BD116D7C3",
+      "releaseSha256": "A14EC031C176C0C2A3167CDC48026009C081CA71F7CCFDC6F99E928BD116D7C3",
+      "downloadUrl": "https://github.com/mfoltz/Eclipse/releases/download/v1.3.17-pre/Eclipse.dll",
+      "error": ""
+    },
+    {
+      "status": "passed",
+      "level": "release-digest",
+      "stagedFileName": "RetroCamera.dll",
+      "releaseAssetName": "RetroCamera.dll",
+      "repository": "mfoltz/RetroCamera",
+      "tag": "v1.5.4",
+      "localSha256": "2923C1F42E6E67370B45FB78A3CBEA97087AB28602E7A840FB505097129890AF",
+      "releaseSha256": "2923C1F42E6E67370B45FB78A3CBEA97087AB28602E7A840FB505097129890AF",
+      "downloadUrl": "https://github.com/mfoltz/RetroCamera/releases/download/v1.5.4/RetroCamera.dll",
+      "error": ""
+    }
+  ]
+}
