@@ -1,3 +1,5 @@
+using ProjectM;
+
 namespace Emberglass.CustomPrefabs;
 
 internal static class CustomPrefabBuiltInProofDefinitions
@@ -13,6 +15,9 @@ internal static class CustomPrefabBuiltInProofDefinitions
             SourcePrefabGuid: BloodRagePrefabGuid,
             GeneratedAssetName: BloodRageGeneratedAssetName,
             ClientSyncRequired: true,
-            CleanupPolicy: CustomPrefabCleanupPolicy.Destroy));
+            CleanupPolicy: CustomPrefabCleanupPolicy.Destroy,
+            EditPlan: CustomPrefabEditPlan.Create(
+                "blood-rage-proof-edits",
+                Edit => Edit.RemoveBuffer<ModifyUnitStatBuff_DOTS>("remove inherited stat modifiers"))));
     }
 }

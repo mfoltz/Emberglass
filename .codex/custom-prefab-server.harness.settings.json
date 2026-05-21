@@ -73,6 +73,7 @@
       ],
       "successMarkers": [
         "\\[Info\\s+:\\s+BepInEx\\]\\s+Loading \\[Emberglass [^\\]]+\\]",
+        "\\[CustomPrefabs\\] Applied custom prefab edit plan; provider=emberglass\\.proof\\.blood-rage",
         "\\[CustomPrefabs\\] Registered server prefab clone; provider=emberglass\\.proof\\.blood-rage",
         "\\[CustomPrefabs\\] Registered 1 active custom prefab definition\\(s\\)\\."
       ],

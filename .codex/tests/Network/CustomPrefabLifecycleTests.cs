@@ -35,6 +35,22 @@ public sealed class CustomPrefabLifecycleTests
     }
 
     [Fact]
+    public void Definition_ExposesStunlockShapedLifecycleDefaults()
+    {
+        CustomPrefabDefinition Definition = new(
+            ProviderId: "proof.provider",
+            SourcePrefabGuid: -491593410,
+            GeneratedAssetName: "AB_Blood_BloodRage_Buff_EmberglassProof",
+            ClientSyncRequired: false,
+            CleanupPolicy: CustomPrefabCleanupPolicy.Destroy);
+
+        Assert.Equal(Definition.SourcePrefabGuid, Definition.BasePrefabGuid);
+        Assert.Equal(CustomPrefabWorldTargets.Server | CustomPrefabWorldTargets.Client, Definition.WorldTargets);
+        Assert.Equal(CustomPrefabSnapshotMode.None, Definition.SnapshotMode);
+        Assert.True(Definition.EditPlan.IsEmpty);
+    }
+
+    [Fact]
     public void Registry_AllowsClientMirrorRequiredRegistrations()
     {
         try
@@ -58,6 +74,35 @@ public sealed class CustomPrefabLifecycleTests
     }
 
     [Fact]
+    public void Registry_StoresServerSideEditPlanByGeneratedPrefabGuid()
+    {
+        try
+        {
+            CustomPrefabEditPlan EditPlan = CustomPrefabEditPlan.Create(
+                "strip-stat-modifiers",
+                Edit => Edit.RemoveBuffer<ModifyUnitStatBuff_DOTS>("remove inherited stat modifiers"));
+
+            CustomPrefabRegistration Registration = CustomPrefabRegistry.Register(new(
+                ProviderId: "proof.provider",
+                SourcePrefabGuid: -491593410,
+                GeneratedAssetName: "AB_Blood_BloodRage_Buff_EmberglassProof",
+                ClientSyncRequired: true,
+                CleanupPolicy: CustomPrefabCleanupPolicy.Destroy,
+                EditPlan: EditPlan));
+
+            Assert.True(CustomPrefabRegistry.TryGetEditPlan(
+                Registration.GeneratedPrefabGuid,
+                out CustomPrefabEditPlan StoredPlan));
+            Assert.Equal(1, StoredPlan.Count);
+            Assert.Equal("strip-stat-modifiers", StoredPlan.Name);
+        }
+        finally
+        {
+            CustomPrefabRegistry.ClearForTesting();
+        }
+    }
+
+    [Fact]
     public void BuiltInProofDefinitions_RegisterBloodRageMirrorSeed()
     {
         try
@@ -70,6 +115,11 @@ public sealed class CustomPrefabLifecycleTests
             Assert.Equal("AB_Blood_BloodRage_Buff_EmberglassProof", Registration.GeneratedAssetName);
             Assert.True(Registration.ClientSyncRequired);
             Assert.Equal(CustomPrefabCleanupPolicy.Destroy, Registration.CleanupPolicy);
+            Assert.True(CustomPrefabRegistry.TryGetEditPlan(
+                Registration.GeneratedPrefabGuid,
+                out CustomPrefabEditPlan EditPlan));
+            Assert.Equal("blood-rage-proof-edits", EditPlan.Name);
+            Assert.Equal(1, EditPlan.Count);
         }
         finally
         {

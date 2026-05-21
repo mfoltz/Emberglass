@@ -425,6 +425,7 @@ public static class StubAssemblyResolver
                 || string.Equals(fullTypeName, "Unity.Entities.EntityQuery", StringComparison.Ordinal)
                 || string.Equals(fullTypeName, "Unity.Entities.EntityQueryOptions", StringComparison.Ordinal)
                 || KnownGenericValueTypes.ContainsKey(fullTypeName)
+                || string.Equals(fullTypeName, "ProjectM.ModifyUnitStatBuff_DOTS", StringComparison.Ordinal)
                 || string.Equals(fullTypeName, "ProjectM.Network.NetworkIdSystem+Singleton", StringComparison.Ordinal)
                 || string.Equals(fullTypeName, "ProjectM.Network.NetworkIdSystem.Singleton", StringComparison.Ordinal);
 
@@ -1222,7 +1223,7 @@ public static class StubAssemblyResolver
                     "Unity.Entities.EntityQueryOptions"
                 },
                 "UnityEngine.CoreModule" => new[] { "UnityEngine.MonoBehaviour", "UnityEngine.WaitForSeconds" },
-                "ProjectM.Shared" => new[] { "ProjectM.WorldUtility", "ProjectM.Network.NetworkIdSystem+Singleton", "Singleton", "ProjectM.Network.User" },
+                "ProjectM.Shared" => new[] { "ProjectM.WorldUtility", "ProjectM.ModifyUnitStatBuff_DOTS", "ProjectM.Network.NetworkIdSystem+Singleton", "Singleton", "ProjectM.Network.User" },
                 _ => Array.Empty<string>()
             };
         }

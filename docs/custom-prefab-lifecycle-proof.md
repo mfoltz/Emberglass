@@ -82,6 +82,29 @@ override from this evidence alone. Those are future rungs with separate receipts
 small Emberglass-owned recipe/coordinator around the lifecycle states we can already prove: declared, server
 materialized, client mirrored, use-proven, and cleanup-proven.
 
+## Buff Clone Editing Proof
+
+The first KindredAuras-shaped follow-up is reliable buff cloning with ordinary, typed Emberglass component edits. This is
+still internal and proof-only, but it is the practical lane for visual buff reuse: clone a known buff so its visual/icon
+data survives, then strip or adjust server-side gameplay/stat behavior before the generated prefab is registered.
+
+`CustomPrefabDefinition` now carries the near-term Stunlock-shaped vocabulary without implementing the full native
+builder surface:
+
+- `BasePrefabGuid` currently aliases the proven clone source.
+- `WorldTargets` defaults to server and client.
+- `SnapshotMode` is fixed to `None`.
+- `EditPlan` is an optional root-entity, server-side typed edit plan.
+
+`CustomPrefabEditPlan` supports root-entity `Remove<T>`, `RemoveBuffer<T>`, `Edit<T>`, and `EditBuffer<T>` actions. These
+edits run after the prefab entity is cloned and assigned its generated `PrefabGUID`, but before the prefab lookup maps
+and `RegisterPrefabEvent` are emitted. Missing components are logged as skipped edits instead of failing registration,
+so proof recipes can be tried against nearby buffs without making startup brittle.
+
+The Blood Rage proof currently uses `blood-rage-proof-edits` to remove the inherited `ModifyUnitStatBuff_DOTS` buffer on
+the server clone. The client mirror still receives the deterministic clone recipe only; client-side edit serialization is
+parked until a visual proof shows the client needs edited components to render correctly.
+
 ## Client Mirror Proof Gate
 
 `CustomPrefabMirrorCoordinator` registers two internal VNetwork packets:
@@ -138,10 +161,12 @@ mirror only proves deterministic client-side manufacture for a source prefab alr
    generated prefab id.
 3. With `EMBERGLASS_CUSTOM_PREFAB_PROOF_BUFF=1`, confirm the server logs application of the generated buff clone after
    player-character attach and mirror ack.
-4. Persist at least one entity using that generated prefab id, or document that the Blood Rage buff use proof is
+4. Confirm the server logs the `blood-rage-proof-edits` receipt with applied/skipped counts, and verify the edited clone
+   still presents the expected visual/UI evidence.
+5. Persist at least one entity using that generated prefab id, or document that the Blood Rage buff use proof is
    non-persistent and add a separate persistence fixture before cleanup testing.
-5. Restart with the provider absent but Emberglass present.
-6. Confirm cleanup logs the orphan receipt and destroys the entity before normal game systems process it.
-7. Stop if the client cannot mirror before visual verification, if detection requires provider-owned component types, if
+6. Restart with the provider absent but Emberglass present.
+7. Confirm cleanup logs the orphan receipt and destroys the entity before normal game systems process it.
+8. Stop if the client cannot mirror before visual verification, if detection requires provider-owned component types, if
    the entity survives into dangerous processing, or if
    proving timing requires broad harness/control-plane changes.

@@ -110,7 +110,8 @@ internal sealed class CustomPrefabRegistrar
             return false;
         }
 
-        if (!RegisterClone(registration, sourcePrefab, out reason))
+        CustomPrefabRegistry.TryGetEditPlan(registration.GeneratedPrefabGuid, out CustomPrefabEditPlan editPlan);
+        if (!RegisterClone(registration, sourcePrefab, editPlan ?? CustomPrefabEditPlan.Empty, out reason))
         {
             return false;
         }
@@ -123,7 +124,11 @@ internal sealed class CustomPrefabRegistrar
         return true;
     }
 
-    static bool RegisterClone(CustomPrefabRegistration registration, Entity sourcePrefab, out string reason)
+    static bool RegisterClone(
+        CustomPrefabRegistration registration,
+        Entity sourcePrefab,
+        CustomPrefabEditPlan editPlan,
+        out string reason)
     {
         reason = string.Empty;
         PrefabGUID sourcePrefabGuid = new(registration.SourcePrefabGuid);
@@ -141,6 +146,12 @@ internal sealed class CustomPrefabRegistrar
             prefabGuid = generatedPrefabGuid;
         });
         prefabTarget.Add<Prefab>();
+
+        CustomPrefabEditReceipt editReceipt = editPlan.Apply(registration, prefabTarget);
+        if (editReceipt.TotalCount > 0)
+        {
+            VWorld.Log.LogInfo($"[CustomPrefabs] Applied custom prefab edit plan; provider={registration.ProviderId}, generatedPrefabGuid={registration.GeneratedPrefabGuid}, plan={editReceipt.PlanName}, applied={editReceipt.AppliedCount}, skipped={editReceipt.SkippedCount}, edits={string.Join(",", editReceipt.Messages)}.");
+        }
 
         AssetGuid generatedAssetGuid = new CustomPrefabIds(
             registration.GeneratedPrefabGuid,
