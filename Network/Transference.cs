@@ -3986,7 +3986,7 @@ internal static class Transference
         {
             rawBytes = File.ReadAllBytes(stagedFilePath);
         }
-        catch (IOException ex)
+        catch (Exception ex) when (IsStagedModFileAccessException(ex))
         {
             errorMessage = $"Unable to read staged asset '{fileName}' for provenance verification: {ex.Message}";
             return false;
