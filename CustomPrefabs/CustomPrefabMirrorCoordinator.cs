@@ -9,6 +9,8 @@ internal static class CustomPrefabMirrorCoordinator
     static readonly Dictionary<(ulong PlatformId, int GeneratedPrefabGuid), CustomPrefabMirrorAckReceipt> AckReceipts = [];
     static bool _initialized;
 
+    internal static event Action<CustomPrefabMirrorAckReceipt> MirrorAckRecorded;
+
     public static void Initialize()
     {
         if (_initialized)
@@ -114,6 +116,19 @@ internal static class CustomPrefabMirrorCoordinator
         ulong platformId,
         int generatedPrefabGuid,
         out CustomPrefabMirrorAckReceipt receipt)
+        => TryGetAck(platformId, generatedPrefabGuid, out receipt);
+
+    internal static bool TryGetSucceededAck(
+        ulong platformId,
+        int generatedPrefabGuid,
+        out CustomPrefabMirrorAckReceipt receipt)
+        => TryGetAck(platformId, generatedPrefabGuid, out receipt)
+            && receipt.Succeeded;
+
+    static bool TryGetAck(
+        ulong platformId,
+        int generatedPrefabGuid,
+        out CustomPrefabMirrorAckReceipt receipt)
     {
         lock (Gate)
         {
@@ -173,9 +188,10 @@ internal static class CustomPrefabMirrorCoordinator
 
     static void OnMirrorAck(User sender, CustomPrefabMirrorAckPacket packet)
     {
-        RecordAck(sender.PlatformId, packet);
+        CustomPrefabMirrorAckReceipt receipt = RecordAck(sender.PlatformId, packet);
         string status = packet.Succeeded ? "succeeded" : "failed";
         VWorld.Log.LogInfo($"[CustomPrefabs] Client prefab mirror {status}; platformId={sender.PlatformId}, provider={packet.ProviderId}, generatedPrefabGuid={packet.GeneratedPrefabGuid}, reason={packet.Reason}.");
+        MirrorAckRecorded?.Invoke(receipt);
     }
 
     static void SendAck(string providerId, int generatedPrefabGuid, bool succeeded, string reason)
@@ -186,7 +202,7 @@ internal static class CustomPrefabMirrorCoordinator
         VNetwork.SendToServer(new CustomPrefabMirrorAckPacket(providerId, generatedPrefabGuid, succeeded, safeReason));
     }
 
-    static void RecordAck(ulong platformId, CustomPrefabMirrorAckPacket packet)
+    static CustomPrefabMirrorAckReceipt RecordAck(ulong platformId, CustomPrefabMirrorAckPacket packet)
     {
         CustomPrefabMirrorAckReceipt receipt = new(
             platformId,
@@ -199,5 +215,7 @@ internal static class CustomPrefabMirrorCoordinator
         {
             AckReceipts[(platformId, packet.GeneratedPrefabGuid)] = receipt;
         }
+
+        return receipt;
     }
 }

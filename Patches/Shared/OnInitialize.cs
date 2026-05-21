@@ -81,6 +81,7 @@ internal static class GameBootstrapPatch
         }
 
         RequestResponse.Uninitialize();
+        CustomPrefabProofBuffApplier.Uninitialize();
         CustomPrefabMirrorCoordinator.Uninitialize();
 
         if (VWorld.IsServer)
@@ -108,6 +109,7 @@ internal static class GameBootstrapPatch
         {
             Players.Initialize();
             PlayerPresenceValidationProbe.Initialize();
+            CustomPrefabProofBuffApplier.Initialize();
         }
 
         if (VWorld.IsClient)

@@ -46,9 +46,41 @@ internal proof definitions are manufactured without making the registry a public
 `CustomPrefabBuiltInProofDefinitions` currently seeds the Blood Rage proof definition during server bootstrap. This is a
 temporary runtime-test preflight hook, not the future provider API.
 
+`CustomPrefabProofBuffApplier` is an opt-in runtime proof hook enabled by `EMBERGLASS_CUSTOM_PREFAB_PROOF_BUFF=1`. It
+subscribes to the player-character attach observer and custom-prefab mirror acknowledgements, then applies the generated
+Blood Rage buff to the attached character only after the server clone exists and the client mirror ack has succeeded.
+This is a validation aid for the first generated-prefab use proof, not a reusable buff API.
+
 The manifest is the save-safety identity. Emberglass intentionally does not rely on provider-owned ECS component types,
 because those types disappear when the provider mod is removed. A custom ECS marker is also deferred until component
 persistence and IL2CPP registration are proven separately.
+
+## Stunlock-Shaped Design Notes
+
+`C:\Users\mitch\Downloads\CustomPrefab.cs` is evidence for the intended native flow, not an API Emberglass can call or
+copy. Its useful design lesson is that custom prefabs are descriptors first and prefab entities second: a builder carries
+asset identity, an optional base prefab, target worlds, component edits, optional blob data, and an optional network
+snapshot override, then a lifecycle system materializes that descriptor during a narrow game-data readiness window.
+
+Emberglass should rhyme with that shape while staying inside proven managed seams. The near-term internal descriptor can
+remain much smaller than Stunlock's builder, but its vocabulary should leave room for the same lifecycle:
+
+- `providerId`
+- deterministic asset identity and generated prefab identity
+- `basePrefabGuid` as the clone/inheritance source
+- `worldTargets` for server, client, or both
+- `clientMirrorRequired`
+- `cleanupPolicy`
+- `snapshotMode=none` until snapshot attachment is proven
+- empty `componentEdits` until unmanaged component and buffer mutation is separately proven
+
+The current Blood Rage proof maps to that descriptor as a clone-base recipe: base prefab `PrefabGUID(-491593410)`,
+server and client targets, no component edits, no snapshot override, and `cleanupPolicy=Destroy`.
+
+Do not implement raw stable-type-hash component mutation, blob serialization/remap, empty-prefab authoring, or snapshot
+override from this evidence alone. Those are future rungs with separate receipts. The next durable code shape should be a
+small Emberglass-owned recipe/coordinator around the lifecycle states we can already prove: declared, server
+materialized, client mirrored, use-proven, and cleanup-proven.
 
 ## Client Mirror Proof Gate
 
@@ -104,9 +136,12 @@ mirror only proves deterministic client-side manufacture for a source prefab alr
    prefab id.
 2. Connect a client with Emberglass present and confirm the server logs a successful mirror ack for that platform id and
    generated prefab id.
-3. Spawn and persist at least one entity using that generated prefab id.
-4. Restart with the provider absent but Emberglass present.
-5. Confirm cleanup logs the orphan receipt and destroys the entity before normal game systems process it.
-6. Stop if the client cannot mirror before visual verification, if detection requires provider-owned component types, if
+3. With `EMBERGLASS_CUSTOM_PREFAB_PROOF_BUFF=1`, confirm the server logs application of the generated buff clone after
+   player-character attach and mirror ack.
+4. Persist at least one entity using that generated prefab id, or document that the Blood Rage buff use proof is
+   non-persistent and add a separate persistence fixture before cleanup testing.
+5. Restart with the provider absent but Emberglass present.
+6. Confirm cleanup logs the orphan receipt and destroys the entity before normal game systems process it.
+7. Stop if the client cannot mirror before visual verification, if detection requires provider-owned component types, if
    the entity survives into dangerous processing, or if
    proving timing requires broad harness/control-plane changes.

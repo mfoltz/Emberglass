@@ -28,7 +28,7 @@ internal sealed class CustomPrefabRegistrar
         _manifestStore = manifestStore;
     }
 
-    public int RegisterActiveServerPrefabs()
+    public int RegisterActiveServerPrefabs(bool logMissingSources = true)
     {
         IReadOnlyList<CustomPrefabRegistration> registrations = CustomPrefabRegistry.ActiveRegistrations;
         if (registrations.Count == 0)
@@ -41,7 +41,7 @@ internal sealed class CustomPrefabRegistrar
 
         foreach (CustomPrefabRegistration registration in registrations)
         {
-            registeredCount += TryRegister(registration, prefabsByGuid, recordManifest: true, out _) ? 1 : 0;
+            registeredCount += TryRegister(registration, prefabsByGuid, recordManifest: true, logMissingSources, out _) ? 1 : 0;
         }
 
         return registeredCount;
@@ -53,7 +53,7 @@ internal sealed class CustomPrefabRegistrar
         out string reason)
     {
         Dictionary<int, Entity> prefabsByGuid = GatherSourcePrefabs(new[] { registration.SourcePrefabGuid });
-        return TryRegister(registration, prefabsByGuid, recordManifest, out reason);
+        return TryRegister(registration, prefabsByGuid, recordManifest, logMissingSources: true, out reason);
     }
 
     static Dictionary<int, Entity> GatherSourcePrefabs(IEnumerable<int> sourcePrefabGuids)
@@ -95,13 +95,18 @@ internal sealed class CustomPrefabRegistrar
         CustomPrefabRegistration registration,
         IReadOnlyDictionary<int, Entity> prefabsByGuid,
         bool recordManifest,
+        bool logMissingSources,
         out string reason)
     {
         if (!prefabsByGuid.TryGetValue(registration.SourcePrefabGuid, out Entity sourcePrefab)
             || !sourcePrefab.Exists())
         {
             reason = "source prefab missing";
-            VWorld.Log.LogWarning($"[CustomPrefabs] Source prefab missing; provider={registration.ProviderId}, sourcePrefabGuid={registration.SourcePrefabGuid}.");
+            if (logMissingSources)
+            {
+                VWorld.Log.LogWarning($"[CustomPrefabs] Source prefab missing; provider={registration.ProviderId}, sourcePrefabGuid={registration.SourcePrefabGuid}.");
+            }
+
             return false;
         }
 

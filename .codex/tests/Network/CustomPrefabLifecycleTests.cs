@@ -237,4 +237,49 @@ public sealed class CustomPrefabLifecycleTests
 
         Assert.True(Options.HasFlag(EntityQueryOptions.IncludeDisabled));
     }
+
+    [Theory]
+    [InlineData(0, 0, true)]
+    [InlineData(1, 0, false)]
+    [InlineData(1, 1, true)]
+    public void RegistrationSystem_DisablesOnlyWhenThereIsNoWorkOrRegistrationSucceeded(
+        int activeRegistrationCount,
+        int registeredCount,
+        bool expectedShouldDisable)
+    {
+        Assert.Equal(
+            expectedShouldDisable,
+            CustomPrefabRegistrationSystem.ShouldDisableAfterAttempt(activeRegistrationCount, registeredCount));
+    }
+
+    [Theory]
+    [InlineData(true, true, true, true, true, true, false, true)]
+    [InlineData(false, true, true, true, true, true, false, false)]
+    [InlineData(true, false, true, true, true, true, false, false)]
+    [InlineData(true, true, false, true, true, true, false, false)]
+    [InlineData(true, true, true, false, true, true, false, false)]
+    [InlineData(true, true, true, true, true, false, false, false)]
+    [InlineData(true, true, true, true, false, false, false, true)]
+    [InlineData(true, true, true, true, true, true, true, false)]
+    public void ProofBuffApplier_WaitsForCharacterRegistrationServerPrefabAndMirrorAck(
+        bool enabled,
+        bool hasCharacter,
+        bool hasRegistration,
+        bool serverPrefabRegistered,
+        bool clientSyncRequired,
+        bool clientMirrorSucceeded,
+        bool alreadyApplied,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            CustomPrefabProofBuffApplier.CanAttemptApply(
+                enabled,
+                hasCharacter,
+                hasRegistration,
+                serverPrefabRegistered,
+                clientSyncRequired,
+                clientMirrorSucceeded,
+                alreadyApplied));
+    }
 }
