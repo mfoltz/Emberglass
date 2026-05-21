@@ -347,6 +347,8 @@ internal static class Transference
     const int DEFAULT_MAX_ACTIVE_OUTGOING_TRANSFERS = 2;
     const int RELEASE_DIGEST_CACHE_TTL_MINUTES = 15;
     const int TRANSFER_WORK_QUEUE_LOG_INTERVAL_SECONDS = 5;
+    const int TRANSFER_PROGRESS_LOG_PERCENT_STEP = 25;
+    const int TRANSFER_PROGRESS_BAR_WIDTH = 10;
     delegate bool TryGetShareMetadataDelegate(
         string metadataKey,
         out PluginShareMetadataStore.PluginShareMetadata metadata,
@@ -482,8 +484,8 @@ internal static class Transference
             pendingServerOffers[offerId] = new PendingServerOffer(offer, request, user.PlatformId, expiresAt);
         }
 
-        VWorld.Log.LogWarning(
-            $"Transfer offered ~ ID: {offerId} | Plugin: {offer.FileNameString} | Target: {user.PlatformId} | Expires: {expiresAt:HH\\:mm\\:ss}");
+        VWorld.Log.LogInfo(
+            $"[VShare] Offer sent: {offer.FileNameString} -> {user.PlatformId} (offer {offerId}, expires {expiresAt:HH\\:mm\\:ss}).");
 
         API.Shared.VNetwork.SendToClient(user, offer);
         return offerId;
@@ -536,7 +538,7 @@ internal static class Transference
                 $"Overwrite confirmation recorded for {offer.FileNameString} (offer {offer.Id}).");
         }
 
-        VWorld.Log.LogWarning($"Transfer accepted ~ ID: {offer.Id} | Plugin: {offer.FileNameString}");
+        VWorld.Log.LogInfo($"[VShare] Offer accepted: {offer.FileNameString} (offer {offer.Id}).");
         API.Shared.VNetwork.SendToServer(new TransferAccept(offerId));
         return true;
     }
@@ -598,16 +600,16 @@ internal static class Transference
 
         if (!started)
         {
-            VWorld.Log.LogWarning(
-                $"Transfer queued ~ ID: {transfer.TransferId} | Plugin: {transfer.Request.FileNameString} | " +
-                $"Active: {activeCount} | Queued: {queuedCount} | MaxActive: {MaxActiveOutgoingTransfers}");
+            VWorld.Log.LogInfo(
+                $"[VShare] Transfer queued: {transfer.Request.FileNameString} (transfer {transfer.TransferId}, " +
+                $"active {activeCount}, queued {queuedCount}, max {MaxActiveOutgoingTransfers}).");
         }
     }
 
     static void StartOutgoingTransfer(QueuedOutgoingTransfer transfer)
     {
-        VWorld.Log.LogWarning(
-            $"Transfer dispatch starting ~ ID: {transfer.TransferId} | Plugin: {transfer.Request.FileNameString}");
+        VWorld.Log.LogDebug(
+            $"[VShare] Transfer dispatch starting: {transfer.Request.FileNameString} (transfer {transfer.TransferId}).");
         OutgoingTransferRoutine(transfer).Run();
     }
 
@@ -645,8 +647,8 @@ internal static class Transference
             queuedCount = outgoingTransferScheduler.QueuedCount;
         }
 
-        VWorld.Log.LogWarning(
-            $"Transfer dispatch completed ~ ID: {transferId} | Active: {activeCount} | Queued: {queuedCount}");
+        VWorld.Log.LogDebug(
+            $"[VShare] Transfer dispatch completed: {transferId} (active {activeCount}, queued {queuedCount}).");
     }
 
     static int GetActiveOutgoingTransferCount()
@@ -817,7 +819,7 @@ internal static class Transference
                     yield return extractRoutine.Current;
                 }
 
-                VWorld.Log.LogWarning($"Extracted {fileName} to {Paths.GameRootPath}");
+                VWorld.Log.LogInfo($"[VShare] Extracted {fileName} to {Paths.GameRootPath}.");
 
                 yield break;
             }
@@ -827,7 +829,7 @@ internal static class Transference
             if (VShare.TryGetCachedDll(fileName, clientbound, out byte[] cachedBytes))
             {
                 string operation = clientbound ? "Sending" : "Writing";
-                VWorld.Log.LogWarning($"{operation} from cache directory...");
+                VWorld.Log.LogInfo($"[VShare] {operation} {fileName} from cache.");
 
                 if (!clientbound)
                 {
@@ -875,11 +877,11 @@ internal static class Transference
                     }
                     else
                     {
-                        VWorld.Log.LogWarning($"Download for {fileName} complete! ({DateTime.Now:HH\\:mm\\:ss})");
+                        VWorld.Log.LogInfo(FormatTransferCompleteMessage(fileName, fileBytes.Length));
 
                         if (hotload)
                         {
-                            VWorld.Log.LogWarning("Loading plugin...");
+                            VWorld.Log.LogInfo($"[VShare] Loading plugin: {fileName}.");
                             LogHotloadPluginResult(filePath, LoadPlugin(filePath));
                         }
                     }
@@ -918,7 +920,7 @@ internal static class Transference
         byte[] releaseDigestBytes = verificationResult.ReleaseDigestBytes ?? [];
         ushort chunkSize = Const.PACKET_BYTES;
 
-        VWorld.Log.LogWarning($"Starting plugin transfer ~ ID: {id} | Plugin: {fileName} | Size: {fileBytes.Length.PrettyBytes()} ({DateTime.Now.TimeOfDay})");
+        VWorld.Log.LogInfo(FormatTransferDispatchMessage(fileName, fileBytes.Length, id));
 
         TransferSession init = new(
             id,
@@ -944,7 +946,7 @@ internal static class Transference
     }
     static void OnTransferSession(User sender, TransferSession session)
     {
-        VWorld.Log.LogWarning($"Starting plugin transfer ~ ID: {session.Id} | Plugin: {session.FileNameString} | Size: {session.TotalBytes.PrettyBytes()} ({DateTime.Now.TimeOfDay})");
+        VWorld.Log.LogInfo(FormatTransferStartMessage(session.FileNameString, session.TotalBytes));
         RegisterIncomingTransfer(session, sender.PlatformId);
     }
     /// <summary>
@@ -987,13 +989,13 @@ internal static class Transference
             pendingClientOffers[offer.Id] = new PendingClientOffer(offer, expiresAt);
         }
 
-        VWorld.Log.LogWarning(
-            $"Transfer offer received ~ ID: {offer.Id} | Plugin: {offer.FileNameString} | Expires: {expiresAt:HH\\:mm\\:ss}");
+        VWorld.Log.LogInfo(
+            $"[VShare] Offer received: {offer.FileNameString} (offer {offer.Id}, expires {expiresAt:HH\\:mm\\:ss}).");
 
         if (ShouldAutoAcceptSharedModOffer(offer, GetUtcNow()))
         {
-            VWorld.Log.LogWarning(
-                $"Auto-accepting shared mod offer from recent client request ~ ID: {offer.Id} | Plugin: {offer.FileNameString}");
+            VWorld.Log.LogInfo(
+                $"[VShare] Auto-accepting requested share: {offer.FileNameString} (offer {offer.Id}).");
             TryAcceptTransferOffer(offer.Id);
         }
     }
@@ -1037,8 +1039,8 @@ internal static class Transference
             pendingServerOffers.Remove(accept.Id);
         }
 
-        VWorld.Log.LogWarning(
-            $"Transfer accepted ~ ID: {accept.Id} | Plugin: {pendingOffer.Offer.FileNameString} | Target: {user.PlatformId}");
+        VWorld.Log.LogInfo(
+            $"[VShare] Offer accepted: {pendingOffer.Offer.FileNameString} by {user.PlatformId} (offer {accept.Id}).");
         InternalTransferRequest(user, pendingOffer.Request, pendingOffer.Offer.Id);
     }
     /// <summary>
@@ -1277,7 +1279,7 @@ internal static class Transference
                 yield return extractRoutine.Current;
             }
 
-            VWorld.Log.LogWarning($"Extracted {incoming.FileName} to {Paths.GameRootPath}");
+            VWorld.Log.LogInfo($"[VShare] Extracted {incoming.FileName} to {Paths.GameRootPath}.");
             DeleteTemporaryFileIfPresent(tempFilePath);
 
             yield break;
@@ -1286,13 +1288,11 @@ internal static class Transference
         try
         {
             FinalizeIncomingFile(tempFilePath, filePath, allowOverwrite);
-            VWorld.Log.LogWarning(
-                $"Download for {incoming.FileName} complete! " +
-                $"({DateTime.Now:HH\\:mm\\:ss})");
+            VWorld.Log.LogInfo(FormatTransferCompleteMessage(incoming.FileName, incoming.TotalBytes));
 
             if (complete.Hotload)
             {
-                VWorld.Log.LogWarning("Loading plugin...");
+                VWorld.Log.LogInfo($"[VShare] Loading plugin: {incoming.FileName}.");
                 LogHotloadPluginResult(filePath, LoadPlugin(filePath));
             }
         }
@@ -1423,7 +1423,7 @@ internal static class Transference
             return;
         }
 
-        VWorld.Log?.LogWarning(
+        VWorld.Log?.LogDebug(
             $"Transfer work queue processed {progress.StepsProcessed} step(s), " +
             $"{progress.TransfersCompleted} transfer(s) completed, " +
             $"budget exceeded: {progress.BudgetExceeded}, " +
@@ -1452,6 +1452,100 @@ internal static class Transference
 
         lastTransferWorkQueueLogUtc = Now;
         return true;
+    }
+
+    /// <summary>
+    /// Formats the client-side start line for an incoming VShare transfer.
+    /// </summary>
+    /// <param name="fileName">The staged file name.</param>
+    /// <param name="totalBytes">The total transfer size.</param>
+    /// <returns>A concise operator-facing log line.</returns>
+    static string FormatTransferStartMessage(string fileName, int totalBytes)
+        => $"[VShare] Transfer started: {fileName} ({totalBytes.PrettyBytes()}).";
+
+    /// <summary>
+    /// Formats the server-side dispatch line for an outgoing VShare transfer.
+    /// </summary>
+    /// <param name="fileName">The staged file name.</param>
+    /// <param name="totalBytes">The total transfer size.</param>
+    /// <param name="transferId">The transfer identifier.</param>
+    /// <returns>A concise operator-facing log line.</returns>
+    static string FormatTransferDispatchMessage(string fileName, int totalBytes, Guid transferId)
+        => $"[VShare] Sending {fileName} ({totalBytes.PrettyBytes()}, transfer {transferId}).";
+
+    /// <summary>
+    /// Formats a coarse incoming VShare download progress line.
+    /// </summary>
+    /// <param name="fileName">The staged file name.</param>
+    /// <param name="receivedBytes">The received byte count.</param>
+    /// <param name="totalBytes">The total transfer size.</param>
+    /// <returns>A concise operator-facing progress line.</returns>
+    static string FormatTransferProgressMessage(string fileName, int receivedBytes, int totalBytes)
+    {
+        int percent = CalculateTransferPercent(receivedBytes, totalBytes);
+        int filled = Math.Clamp(percent * TRANSFER_PROGRESS_BAR_WIDTH / 100, 0, TRANSFER_PROGRESS_BAR_WIDTH);
+        string progressBar =
+            new string('#', filled) +
+            new string('-', TRANSFER_PROGRESS_BAR_WIDTH - filled);
+
+        return
+            $"[VShare] Downloading {fileName} [{progressBar}] {percent}% " +
+            $"({receivedBytes.PrettyBytes()} / {totalBytes.PrettyBytes()}).";
+    }
+
+    /// <summary>
+    /// Determines whether an incoming transfer crossed a new progress milestone.
+    /// </summary>
+    /// <param name="receivedBytes">The received byte count.</param>
+    /// <param name="totalBytes">The total transfer size.</param>
+    /// <param name="lastLoggedPercent">The last logged milestone.</param>
+    /// <param name="nextLoggedPercent">The next milestone to remember.</param>
+    /// <returns><c>true</c> when progress should be logged.</returns>
+    static bool ShouldLogTransferProgress(
+        int receivedBytes,
+        int totalBytes,
+        int lastLoggedPercent,
+        out int nextLoggedPercent)
+    {
+        int percent = CalculateTransferPercent(receivedBytes, totalBytes);
+        int milestone = Math.Min(
+            75,
+            percent / TRANSFER_PROGRESS_LOG_PERCENT_STEP * TRANSFER_PROGRESS_LOG_PERCENT_STEP);
+
+        if (milestone <= 0 || milestone <= lastLoggedPercent)
+        {
+            nextLoggedPercent = lastLoggedPercent;
+            return false;
+        }
+
+        nextLoggedPercent = milestone;
+        return true;
+    }
+
+    /// <summary>
+    /// Formats the client-side completion line for a VShare download.
+    /// </summary>
+    /// <param name="fileName">The staged file name.</param>
+    /// <param name="totalBytes">The total transfer size.</param>
+    /// <returns>A concise operator-facing completion line.</returns>
+    static string FormatTransferCompleteMessage(string fileName, int totalBytes)
+        => $"[VShare] Download complete: {fileName} ({totalBytes.PrettyBytes()}, digest verified).";
+
+    /// <summary>
+    /// Calculates a clamped integer transfer percentage.
+    /// </summary>
+    /// <param name="receivedBytes">The received byte count.</param>
+    /// <param name="totalBytes">The total transfer size.</param>
+    /// <returns>A value from 0 through 100.</returns>
+    static int CalculateTransferPercent(int receivedBytes, int totalBytes)
+    {
+        if (totalBytes <= 0)
+        {
+            return 0;
+        }
+
+        double percent = Math.Floor((double)Math.Max(0, receivedBytes) * 100 / totalBytes);
+        return Math.Clamp((int)percent, 0, 100);
     }
 
     /// <summary>
@@ -2081,6 +2175,25 @@ internal static class Transference
     internal static HotloadPluginResult TryLoadPluginForTesting(string filePath)
         => TryLoadPlugin(filePath);
 
+    internal static string FormatTransferStartMessageForTesting(string fileName, int totalBytes)
+        => FormatTransferStartMessage(fileName, totalBytes);
+
+    internal static string FormatTransferProgressMessageForTesting(
+        string fileName,
+        int receivedBytes,
+        int totalBytes)
+        => FormatTransferProgressMessage(fileName, receivedBytes, totalBytes);
+
+    internal static bool ShouldLogTransferProgressForTesting(
+        int receivedBytes,
+        int totalBytes,
+        int lastLoggedPercent,
+        out int nextLoggedPercent)
+        => ShouldLogTransferProgress(receivedBytes, totalBytes, lastLoggedPercent, out nextLoggedPercent);
+
+    internal static string FormatTransferCompleteMessageForTesting(string fileName, int totalBytes)
+        => FormatTransferCompleteMessage(fileName, totalBytes);
+
     internal static byte[] CompressBytesSynchronously(byte[] bytes)
     {
         byte[] result = null;
@@ -2202,6 +2315,7 @@ internal static class Transference
         public int ExpectedChunkCount;
         public int ReceivedBytes { get; private set; }
         public int ReceivedChunkCount { get; private set; }
+        int LastLoggedProgressPercent { get; set; }
         public bool IsComplete => ReceivedBytes >= TotalBytes && ReceivedChunkCount == ExpectedChunkCount;
         /// <summary>
         /// Gets the UTC timestamp when the transfer was created.
@@ -2269,6 +2383,16 @@ internal static class Transference
             _chunks[idx] = bytes;
             ReceivedBytes += bytes.Length;
             ReceivedChunkCount++;
+
+            if (ShouldLogTransferProgress(
+                ReceivedBytes,
+                TotalBytes,
+                LastLoggedProgressPercent,
+                out int nextLoggedProgressPercent))
+            {
+                LastLoggedProgressPercent = nextLoggedProgressPercent;
+                VWorld.Log?.LogInfo(FormatTransferProgressMessage(FileName, ReceivedBytes, TotalBytes));
+            }
         }
         /// <summary>
         /// Concatenates the ordered chunks into a single payload buffer.

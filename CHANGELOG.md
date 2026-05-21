@@ -2,7 +2,10 @@
 
 ## Unreleased
 
+## v0.3.0
+
 - Added a VShare provenance ladder with metadata-first GitHub release identity, required release digest checks for clientbound sharing, strict local preflight receipts, and GitHub Actions artifact attestations for Emberglass DLL release jobs.
+- Made VShare transfer logs quieter and easier to follow, with info-level offer/download/load receipts and coarse digest-verified progress milestones.
 
 ## v0.2.1
 
