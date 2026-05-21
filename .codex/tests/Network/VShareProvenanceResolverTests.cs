@@ -118,4 +118,16 @@ public sealed class VShareProvenanceResolverTests
         Assert.Empty(releaseDigestBytes);
         Assert.Contains("digest mismatch", errorMessage, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// Ensures staged file access failures are skipped instead of interrupting share enumeration.
+    /// </summary>
+    [Fact]
+    public void IsStagedModFileAccessExceptionForTesting_AllowsExpectedAccessFailures()
+    {
+        Assert.True(Transference.IsStagedModFileAccessExceptionForTesting(new IOException("locked")));
+        Assert.True(Transference.IsStagedModFileAccessExceptionForTesting(new UnauthorizedAccessException("denied")));
+        Assert.True(Transference.IsStagedModFileAccessExceptionForTesting(new System.Security.SecurityException("blocked")));
+        Assert.False(Transference.IsStagedModFileAccessExceptionForTesting(new InvalidOperationException("bug")));
+    }
 }

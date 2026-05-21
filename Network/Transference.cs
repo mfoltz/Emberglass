@@ -1,6 +1,7 @@
 using System.Collections;
 using System.IO.Compression;
 using System.Reflection;
+using System.Security;
 using System.Security.Cryptography;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
@@ -4369,7 +4370,7 @@ internal static class Transference
             {
                 rawBytes = File.ReadAllBytes(modFile);
             }
-            catch (IOException ex)
+            catch (Exception ex) when (IsStagedModFileAccessException(ex))
             {
                 VWorld.Log.LogWarning($"Skipping shared mod {fileName}: unable to read staged bytes for provenance verification: {ex.Message}");
                 continue;
@@ -4395,6 +4396,12 @@ internal static class Transference
 
         return entries;
     }
+
+    internal static bool IsStagedModFileAccessExceptionForTesting(Exception ex)
+        => IsStagedModFileAccessException(ex);
+
+    static bool IsStagedModFileAccessException(Exception ex)
+        => ex is IOException or UnauthorizedAccessException or SecurityException;
 
     /// <summary>
     /// Resolves a GitHub Release asset digest, caching results to reduce API calls.
