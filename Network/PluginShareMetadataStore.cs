@@ -132,6 +132,7 @@ internal sealed class PluginShareMetadataStore
     public readonly record struct PluginShareMetadata(
         string GitHubRepo,
         string GitHubTag,
+        string GitHubAssetName,
         bool ClientSafe,
         bool HotloadAllowed,
         IReadOnlyList<string> Tags,
@@ -147,6 +148,7 @@ internal sealed class PluginShareMetadataStore
     {
         public string GitHubRepo { get; set; } = string.Empty;
         public string GitHubTag { get; set; } = string.Empty;
+        public string GitHubAssetName { get; set; } = string.Empty;
         public bool ClientSafe { get; set; }
         public bool HotloadAllowed { get; set; }
         public List<string> Tags { get; set; } = [];
@@ -157,6 +159,7 @@ internal sealed class PluginShareMetadataStore
             => new(
                 GitHubRepo ?? string.Empty,
                 GitHubTag ?? string.Empty,
+                GitHubAssetName ?? string.Empty,
                 ClientSafe,
                 HotloadAllowed,
                 Tags ?? [],

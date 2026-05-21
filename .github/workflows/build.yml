@@ -225,6 +225,8 @@ jobs:
       github.ref == 'refs/heads/main'
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     runs-on: ubuntu-latest
 
     steps:
@@ -269,6 +271,11 @@ jobs:
             --commit '${{ github.sha }}' \
             --run-id '${{ github.run_id }}' \
             --output ./dist/prerelease-notes.md
+
+      - name: Attest prerelease artifact
+        uses: actions/attest@v4
+        with:
+          subject-path: ./bin/Release/net6.0/Emberglass.dll
 
       - name: GH Release (pre-release)
         uses: softprops/action-gh-release@v2.6.2
@@ -330,6 +337,8 @@ jobs:
       github.ref == 'refs/heads/codex/feature-testing'
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     runs-on: ubuntu-latest
 
     steps:
@@ -359,6 +368,11 @@ jobs:
             --configuration Release \
             --no-restore \
             -p:Version="$feature_testing_version"
+
+      - name: Attest feature-testing artifact
+        uses: actions/attest@v4
+        with:
+          subject-path: ./bin/Release/net6.0/Emberglass.dll
 
       - name: GH Release (feature-testing snapshot)
         uses: softprops/action-gh-release@v2.6.2

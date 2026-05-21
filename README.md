@@ -64,8 +64,10 @@ See the [VShare guide](docs/vshare.md) for the full request/consent flow and sta
 * The mod identity is derived from the file name **without** its extension (for example, `MyMod.dll` or `MyMod.zip` → `MyMod`).
 * Clientbound share requests only offer the mods staged by the server operator, so only stage mods that are safe to
   load on clients.
-* GitHub release identity can be auto-resolved from staged asset names in `BepInEx/config/Server` using the
-  `Owner_Repo_Tag.dll` convention (or `Owner__Repo__Tag.dll` when segments contain underscores).
+* GitHub release identity should be declared in `BepInEx/config/Emberglass/ShareMetadata.json` with `GitHubRepo`,
+  `GitHubTag`, and optional `GitHubAssetName`.
+* GitHub release identity can still be auto-resolved from staged asset names in `BepInEx/config/Server` using the
+  `Owner_Repo_Tag.dll` convention (or `Owner__Repo__Tag.dll` when segments contain underscores) when metadata is absent.
 
 ### GitHub Release Auto-Resolution
 
@@ -90,11 +92,13 @@ If the staged asset does not follow the pattern, Emberglass cannot auto-resolve 
 * Before transfer, Emberglass fetches the GitHub Release digest for the staged asset and compares it to the local file hash.
   * If the hash **matches**, the transfer proceeds.
   * If the hash **mismatches**, the transfer is aborted, the cache entry is invalidated, and the user is prompted to re-download.
+* Optional strict preflight receipts are available with `.codex/scripts/vshare-provenance-preflight.ps1`; add
+  `-RequireAttestation` to verify GitHub artifact attestations before runtime.
 
 ### Troubleshooting
 
-* **Unresolved GitHub release identity**: Emberglass cannot determine the GitHub owner, repo, and tag from the staged
-  asset name. Rename the staged file to match the `Owner_Repo_Tag` pattern.
+* **Unresolved GitHub release identity**: Emberglass cannot determine the GitHub owner, repo, and tag. Add
+  `GitHubRepo` and `GitHubTag` to `ShareMetadata.json`, or rename the staged file to match the `Owner_Repo_Tag` pattern.
 * **Hash mismatch**: Emberglass aborts the transfer and invalidates the cached entry. Re-download the package from
   the GitHub Release and restage it before trying again.
 * **GitHub Release unavailable** (lookup failure or missing digest metadata): Emberglass aborts the transfer and asks you
