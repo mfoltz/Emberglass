@@ -20,13 +20,21 @@ These folders are created automatically when the server initializes the VShare s
 
 Clients initiate a request from the in-game options menu. Emberglass adds the menu button via
 `OptionsManager.AddButton` in `Patches/Shared/OnInitialize.cs` with the label **"Request Shared Mods"**. Selecting it
-sends a request to the server to list any server-staged mods that the client does not yet have.
+sends a request to the server to offer any server-staged mods that the client does not yet have. The click also acts as
+consent for catalog-listed shared-mod offers returned immediately after the request, so the request flow stays one-click
+for mods advertised in the server details.
+
+The same button's hover/details text is populated from the server after the authenticated VNetwork handshake. It lists
+the current server-advertised shared mods with the mod name, GitHub source, release tag, staged file name, file type, and
+runtime-load status. Before the server catalog arrives, the details text reports that it is waiting for server details.
+If the server advertises no shared mods, it reports that no server-shared mods are advertised by this server.
 
 ## Consent and Offer Flow
 
 VShare is opt-in. Selecting **"Request Shared Mods"** is the client consent action for shared clientbound mods. The
 server responds with transfer offers for each eligible missing mod, and offers received shortly after that request are
-accepted automatically so the initial flow stays one-button from the player's perspective.
+accepted automatically only when they match the latest server-advertised catalog, so the initial flow stays one-button
+from the player's perspective while still being bounded by the handshake details.
 
 ## Transfer Throttling
 
@@ -47,7 +55,9 @@ Shared clientbound mods require `BepInEx/config/Emberglass/ShareMetadata.json` m
 when it is marked with `ClientSafe: true` or includes the `client` tag/category. Runtime loading is a separate opt-in:
 only DLL entries that are also marked `HotloadAllowed: true` are offered with hotload enabled. Metadata is also the
 preferred place to declare GitHub release provenance. Entries may be keyed by the staged file base name or by the
-GitHub repo/plugin name parsed from release-style staged assets.
+GitHub repo/plugin name parsed from release-style staged assets. Plain
+GitHub release asset names such as `Eclipse.dll` may also be staged directly when their metadata entry supplies
+`GitHubRepo` and `GitHubTag`; digest checks still use the actual staged asset filename.
 
 Example:
 

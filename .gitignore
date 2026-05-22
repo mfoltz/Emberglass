@@ -298,8 +298,8 @@ dist/
 Patches/Shared/WIP.cs
 Patches/Shared/CastleRebuildTesting.cs
 .prd/receipts/
-.codex/runs/
 .codex/persistent-data/
+.codex/runs/
 .codex/state/
 .codex/tmp/
 .codex/*.harness.settings.json

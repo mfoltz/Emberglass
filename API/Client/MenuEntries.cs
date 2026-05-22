@@ -204,12 +204,13 @@ internal sealed class DividerEntry(string dividerText, string category, int orde
 /// </summary>
 /// <param name="id">The stable identifier for the button.</param>
 /// <param name="nameKey">The localization key for the button name.</param>
-/// <param name="descKey">The localization key for the button description.</param>
+/// <param name="getDescription">The current button description provider.</param>
 /// <param name="category">The category identifier for the entry.</param>
 /// <param name="order">The display order for the entry.</param>
 /// <param name="onClick">The action invoked when the button is clicked.</param>
-internal sealed class ButtonEntry(string id, LocalizationKey nameKey, LocalizationKey descKey, string category, int order, Action onClick) : IMenuEntry
+internal sealed class ButtonEntry(string id, LocalizationKey nameKey, Func<string> getDescription, string category, int order, Action onClick) : IMenuEntry
 {
+    readonly Func<string> getDescription = getDescription ?? throw new ArgumentNullException(nameof(getDescription));
     readonly Action onClick = onClick ?? throw new ArgumentNullException(nameof(onClick));
 
     /// <summary>
@@ -223,11 +224,20 @@ internal sealed class ButtonEntry(string id, LocalizationKey nameKey, Localizati
     /// <summary>
     /// Gets the localization key for the button description.
     /// </summary>
-    public LocalizationKey DescKey { get; } = descKey;
+    public LocalizationKey DescKey => RefreshDescriptionKey();
     /// <inheritdoc />
     public string Category { get; } = category ?? throw new ArgumentNullException(nameof(category));
     /// <inheritdoc />
     public int Order { get; } = order;
+
+    /// <summary>
+    /// Refreshes the stable localization text for the button description.
+    /// </summary>
+    /// <returns>The stable description localization key.</returns>
+    public LocalizationKey RefreshDescriptionKey()
+        => LocalizationKeyManager.GetStableLocalizationKey(
+            $"{Id}.description",
+            getDescription.Invoke() ?? string.Empty);
 
     /// <inheritdoc />
     public void BuildUI(OptionsPanel_Interface panel)
@@ -240,10 +250,11 @@ internal sealed class ButtonEntry(string id, LocalizationKey nameKey, Localizati
         }
 
         SettingsEntry_Button buttonEntry = UIHelper.InstantiatePrefabUnderAnchor(buttonPrefab, panel.ContentNode);
+        LocalizationKey descriptionKey = RefreshDescriptionKey();
 
         buttonEntry.Initialize(
             NameKey,
-            new Il2CppSystem.Nullable_Unboxed<LocalizationKey>(DescKey),
+            new Il2CppSystem.Nullable_Unboxed<LocalizationKey>(descriptionKey),
             new Il2CppSystem.Nullable_Unboxed<LocalizationKey>(LocalizationKey.Empty),
             new Il2CppSystem.Nullable_Unboxed<LocalizationKey>(NameKey),
             onClick

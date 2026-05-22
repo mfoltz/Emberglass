@@ -9,6 +9,7 @@ public static class OptionsManager
     static readonly Dictionary<LocalizationKey, List<IMenuEntry>> _categoryEntries = [];
     public static IReadOnlyDictionary<string, MenuOption> Options => _options;
     static readonly Dictionary<string, MenuOption> _options = [];
+    static readonly HashSet<string> _buttonIds = [];
     public static IReadOnlyDictionary<string, LocalizationKey> CategoryKeys => _categoryKeys;
     static readonly Dictionary<string, LocalizationKey> _categoryKeys = [];
     static readonly HashSet<string> _categoryHeaders = [];
@@ -101,13 +102,43 @@ public static class OptionsManager
     /// <param name="category">The category identifier for the button.</param>
     /// <param name="onClick">The action invoked when the button is clicked.</param>
     public static void AddButton(string id, string name, string description, string category, Action onClick)
+        => AddButton(id, name, () => description, category, onClick);
+
+    /// <summary>
+    /// Registers a button entry in the options menu with dynamically refreshed detail text.
+    /// </summary>
+    /// <param name="id">The stable identifier for the button.</param>
+    /// <param name="name">The display name for the button.</param>
+    /// <param name="getDescription">The current display description provider.</param>
+    /// <param name="category">The category identifier for the button.</param>
+    /// <param name="onClick">The action invoked when the button is clicked.</param>
+    public static void AddButton(string id, string name, Func<string> getDescription, string category, Action onClick)
     {
+        if (!_buttonIds.Add(id))
+        {
+            return;
+        }
+
         var localizationKey = GetOrCreateCategoryKey(category);
         var order = GetNextOrder();
         var nameKey = LocalizationKeyManager.GetLocalizationKey(name);
-        var descriptionKey = LocalizationKeyManager.GetLocalizationKey(description);
 
-        _categoryEntries[localizationKey].Add(new ButtonEntry(id, nameKey, descriptionKey, category, order, onClick));
+        _categoryEntries[localizationKey].Add(new ButtonEntry(id, nameKey, getDescription, category, order, onClick));
+    }
+
+    /// <summary>
+    /// Refreshes a registered button description in the localization table.
+    /// </summary>
+    /// <param name="id">The stable button identifier.</param>
+    public static void RefreshButtonDescription(string id)
+    {
+        foreach (ButtonEntry buttonEntry in _categoryEntries.Values.SelectMany(entries => entries).OfType<ButtonEntry>())
+        {
+            if (string.Equals(buttonEntry.Id, id, StringComparison.Ordinal))
+            {
+                buttonEntry.RefreshDescriptionKey();
+            }
+        }
     }
     /// <summary>
     /// Registers a menu option and tracks it by identifier.
