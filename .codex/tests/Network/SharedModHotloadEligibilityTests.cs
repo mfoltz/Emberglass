@@ -17,10 +17,12 @@ public sealed class SharedModHotloadEligibilityTests
         PluginShareMetadataStore.PluginShareMetadata eligible = new(
             "mfoltz/Eclipse",
             "v1.3.14-pre",
+            "Eclipse.dll",
             true,
             true,
             Array.Empty<string>(),
-            Array.Empty<string>());
+            Array.Empty<string>(),
+            string.Empty);
 
         PluginShareMetadataStore.PluginShareMetadata downloadOnly = eligible with
         {

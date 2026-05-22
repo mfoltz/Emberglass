@@ -1,0 +1,117 @@
+﻿{
+    "profile":  "custom-prefab-server",
+    "modId":  "emberglass",
+    "pluginName":  "Emberglass",
+    "status":  "stopped",
+    "dryRun":  false,
+    "timestamp":  "20260520-225909",
+    "startedAt":  "2026-05-20T22:59:09.9823372-05:00",
+    "finishedAt":  "2026-05-20T23:48:42.3205887-05:00",
+    "runtimeConnection":  {
+                              "host":  "127.0.0.1",
+                              "gamePort":  28015,
+                              "queryPort":  28016,
+                              "serverName":  "Codex Emberglass Custom Prefab",
+                              "password":  null,
+                              "connectionAddress":  "127.0.0.1:28015"
+                          },
+    "paths":  {
+                  "serverExePath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\VRisingServer.exe",
+                  "builtDllPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\bin\\Release\\net6.0\\Emberglass.dll",
+                  "pluginDir":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\plugins",
+                  "serverLogPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\20260520-225909\\custom-prefab-server\\logs\\VRisingServer.log",
+                  "serverInstallPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex",
+                  "lockPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\.codex-harness-lock.json",
+                  "saveName":  "custom-prefab-server-20260520-225909",
+                  "pluginInventory":  [
+                                          "Emberglass.dll"
+                                      ],
+                  "persistentDataPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\persistent-data\\20260520-225909\\custom-prefab-server",
+                  "deployedDllPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\plugins\\Emberglass.dll",
+                  "primaryInstallPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServer"
+              },
+    "markerMatches":  {
+                          "failure":  [
+
+                                      ],
+                          "success":  [
+                                          "\\[Info\\s+:\\s+BepInEx\\]\\s+Loading \\[Emberglass [^\\]]+\\]",
+                                          "\\[CustomPrefabs\\] Applied custom prefab edit plan; provider=emberglass\\.proof\\.blood-rage",
+                                          "\\[CustomPrefabs\\] Registered server prefab clone; provider=emberglass\\.proof\\.blood-rage",
+                                          "\\[CustomPrefabs\\] Registered 1 active custom prefab definition\\(s\\)\\."
+                                      ]
+                      },
+    "diagnostics":  {
+                        "startupFailure":  {
+                                               "evidence":  null,
+                                               "recommendedNextAction":  null,
+                                               "failureClass":  null
+                                           }
+                    },
+    "actionResults":  [
+                          {
+                              "action":  "preflight",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T22:59:09.7814676-05:00",
+                              "details":  {
+                                              "lockPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\.codex-harness-lock.json",
+                                              "serverInstallPath":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex",
+                                              "sharedInstallStatus":  "exclusive-owner-acquired"
+                                          }
+                          },
+                          {
+                              "action":  "build",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T22:59:09.7997153-05:00",
+                              "details":  {
+                                              "builtDllPath":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\bin\\Release\\net6.0\\Emberglass.dll"
+                                          }
+                          },
+                          {
+                              "action":  "deploy",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T22:59:09.8401350-05:00",
+                              "details":  {
+                                              "pluginDir":  "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\plugins"
+                                          }
+                          },
+                          {
+                              "action":  "start",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T22:59:10.0176171-05:00",
+                              "details":  {
+                                              "processId":  30440
+                                          }
+                          },
+                          {
+                              "action":  "wait-ready",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T22:59:27.9825378-05:00",
+                              "details":  {
+                                              "markers":  [
+                                                              "\\[Info\\s+:\\s+BepInEx\\]\\s+Loading \\[Emberglass [^\\]]+\\]",
+                                                              "\\[CustomPrefabs\\] Applied custom prefab edit plan; provider=emberglass\\.proof\\.blood-rage",
+                                                              "\\[CustomPrefabs\\] Registered server prefab clone; provider=emberglass\\.proof\\.blood-rage",
+                                                              "\\[CustomPrefabs\\] Registered 1 active custom prefab definition\\(s\\)\\."
+                                                          ]
+                                          }
+                          },
+                          {
+                              "action":  "collect",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T23:48:02.1424566-05:00",
+                              "details":  {
+                                              "runDirectory":  "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\20260520-225909\\custom-prefab-server"
+                                          }
+                          },
+                          {
+                              "action":  "stop",
+                              "status":  "ok",
+                              "timestamp":  "2026-05-20T23:48:42.3185782-05:00",
+                              "details":  {
+                                              "processId":  30440
+                                          }
+                          }
+                      ],
+    "errorMessage":  null
+}

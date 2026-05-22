@@ -1,0 +1,26 @@
+{
+  "Plugins": {
+    "Eclipse": {
+      "GitHubRepo": "mfoltz/Eclipse",
+      "GitHubTag": "v1.3.17-pre",
+      "GitHubAssetName": "Eclipse.dll",
+      "ClientSafe": true,
+      "HotloadAllowed": true,
+      "Tags": [
+        "client"
+      ],
+      "Categories": []
+    },
+    "RetroCamera": {
+      "GitHubRepo": "mfoltz/RetroCamera",
+      "GitHubTag": "v1.5.4",
+      "GitHubAssetName": "RetroCamera.dll",
+      "ClientSafe": true,
+      "HotloadAllowed": true,
+      "Tags": [
+        "client"
+      ],
+      "Categories": []
+    }
+  }
+}

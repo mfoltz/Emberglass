@@ -1,0 +1,25 @@
+{
+  "startedAt": "2026-05-20T18:53:33.5631967-05:00",
+  "profile": "vshare-provenance-server-runtime",
+  "status": "stopped",
+  "processId": 25204,
+  "runRoot": "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\20260520-185333",
+  "runDirectory": "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\20260520-185333\\vshare-provenance-server-runtime",
+  "serverLogPath": "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\runs\\20260520-185333\\vshare-provenance-server-runtime\\logs\\VRisingServer.log",
+  "bepInExLogPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex\\BepInEx\\LogOutput.log",
+  "persistentDataPath": "C:\\Users\\mitch\\source\\Repos\\Emberglass\\.codex\\persistent-data\\20260520-185333\\vshare-provenance-server-runtime",
+  "emberglassDllSha256": "3D1CEF7AB83379DCFC08CDFE709FF666049EF9D1B2A3523E804CA248265C05C9",
+  "runtimeConnection": {
+    "host": "127.0.0.1",
+    "gamePort": 28015,
+    "queryPort": 28016,
+    "connectionAddress": "127.0.0.1:28015"
+  },
+  "paths": {
+    "serverInstallPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex",
+    "clientInstallPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingCodex",
+    "saveName": "vshare-provenance-server-runtime-20260520-185333"
+  },
+  "readyAt": "2026-05-20T18:54:30.3486561-05:00",
+  "stoppedAt": "2026-05-20T19:00:58.6652467-05:00"
+}

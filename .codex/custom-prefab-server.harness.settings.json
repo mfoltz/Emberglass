@@ -1,0 +1,98 @@
+{
+  "primaryInstallPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServer",
+  "serverInstallPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRisingDedicatedServerCodex",
+  "pluginDir": "BepInEx\\plugins",
+  "serverExe": "VRisingServer.exe",
+  "persistentDataRoot": ".codex\\persistent-data",
+  "logFiles": [
+    "BepInEx\\LogOutput.log"
+  ],
+  "timeouts": {
+    "readinessSeconds": 300,
+    "shutdownSeconds": 15
+  },
+  "profiles": {
+    "custom-prefab-server": {
+      "modId": "emberglass",
+      "pluginName": "Emberglass",
+      "buildScript": ".codex\\install.sh",
+      "buildShell": "bash",
+      "builtDllPath": "bin\\Release\\net6.0\\Emberglass.dll",
+      "requiredPlugins": [
+        {
+          "source": "{RepoRoot}\\bin\\Release\\net6.0\\Emberglass.dll",
+          "destination": "Emberglass.dll"
+        }
+      ],
+      "cleanupPlugins": [
+        "Bloodcraft.dll",
+        "Bloodstone.dll",
+        "Emberglass.dll",
+        "FinishZone.dll",
+        "HookDOTS.API.dll",
+        "KindredCommands.dll",
+        "KindredExtract.dll",
+        "KindredInnkeeper.dll",
+        "KindredLogistics.dll",
+        "KindredPortals.dll",
+        "KindredSacrifice.dll",
+        "KindredSchematics.dll",
+        "KinImmortal.dll",
+        "KinLootBGone.dll",
+        "KinPonds.dll",
+        "KinPoolParty.dll",
+        "KinThrone.dll",
+        "Penumbra.dll",
+        "VRising.DataExtractor.dll",
+        "VRoles.dll"
+      ],
+      "snapshotPaths": [
+        "{PersistentDataPath}\\Settings",
+        "{ServerInstallPath}\\BepInEx\\config\\io.zfolmt.Emberglass.cfg",
+        "{ServerInstallPath}\\BepInEx\\config\\Emberglass"
+      ],
+      "arguments": [
+        "-persistentDataPath",
+        "{PersistentDataPath}",
+        "-saveName",
+        "{SaveName}",
+        "-serverName",
+        "Codex Emberglass Custom Prefab",
+        "-gamePort",
+        "28015",
+        "-queryPort",
+        "28016",
+        "-listOnSteam",
+        "false",
+        "-listOnEOS",
+        "false",
+        "-lanMode",
+        "true",
+        "-logFile",
+        "{ServerLogPath}"
+      ],
+      "successMarkers": [
+        "\\[Info\\s+:\\s+BepInEx\\]\\s+Loading \\[Emberglass [^\\]]+\\]",
+        "\\[CustomPrefabs\\] Applied custom prefab edit plan; provider=emberglass\\.proof\\.blood-rage",
+        "\\[CustomPrefabs\\] Registered server prefab clone; provider=emberglass\\.proof\\.blood-rage",
+        "\\[CustomPrefabs\\] Registered 1 active custom prefab definition\\(s\\)\\."
+      ],
+      "failureMarkers": [
+        "\\[Error\\s+:\\s+BepInEx\\].*Emberglass",
+        "\\[CustomPrefabs\\] Registration failed",
+        "\\[CustomPrefabs\\] Source prefab missing",
+        "\\[CustomPrefabs\\] ConvertedAssetData not found",
+        "There is no Server world!",
+        "Server world is not ready yet",
+        "generic and can't be used in il2cpp"
+      ],
+      "expectedPluginVersions": {
+        "Emberglass": "0.1.6"
+      },
+      "expectedVraVersion": "1.1.12-r99041-b2",
+      "buildEnvironment": {
+        "BEPINEX_PLUGIN_DIR": ""
+      }
+    }
+  }
+}

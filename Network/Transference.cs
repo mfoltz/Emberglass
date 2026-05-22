@@ -1,6 +1,7 @@
 using System.Collections;
 using System.IO.Compression;
 using System.Reflection;
+using System.Security;
 using System.Security.Cryptography;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
@@ -268,6 +269,10 @@ internal static class Transference
         public readonly Guid Id = id;
         public readonly bool Hotload = hotload;
     }
+    readonly record struct QueuedOutgoingTransfer(Guid TransferId, User Target, TransferRequest Request) : IOutgoingTransferWork
+    {
+        public ulong TargetId => Target.PlatformId;
+    }
     public unsafe struct TransferChunk
     {
         public readonly Guid Id;
@@ -316,16 +321,20 @@ internal static class Transference
     static readonly object pendingOfferLock = new();
     static readonly Dictionary<OverwriteConfirmationKey, DateTime> overwriteConfirmations = [];
     static readonly object overwriteConfirmationLock = new();
+    static DateTime sharedModRequestConsentExpiresAtUtc = DateTime.MinValue;
+    static long sharedModRequestConsentClientSessionGeneration = -1;
     static bool offerCleanupStarted;
     static bool incomingCleanupStarted;
     static bool transferWorkQueueStarted;
     static bool _initialized;
+    static readonly object outgoingTransferLock = new();
 
     static readonly WaitForSeconds offerCleanupDelay = new(2f);
     static readonly WaitForSeconds incomingCleanupDelay = new(2f);
     static readonly PluginShareMetadataStore _shareMetadataStore = new();
     static readonly GitHubReleaseClient _gitHubReleaseClient = new();
     static readonly TransferWorkQueue transferWorkQueue = new();
+    static readonly OutgoingTransferScheduler<QueuedOutgoingTransfer> outgoingTransferScheduler = new(DEFAULT_MAX_ACTIVE_OUTGOING_TRANSFERS);
     static readonly Dictionary<ReleaseAssetCacheKey, ReleaseAssetCacheEntry> releaseAssetDigestCache = [];
     static readonly object releaseAssetDigestCacheLock = new();
     static readonly HashSet<string> _hotloadedPluginGuids = new(StringComparer.Ordinal);
@@ -335,8 +344,12 @@ internal static class Transference
     const char STAGED_ASSET_SINGLE_DELIMITER = '_';
     const int OFFER_TIMEOUT_SECONDS = 60;
     const int DEFAULT_TRANSFER_WORK_BUDGET_MS = 2;
+    const int DEFAULT_MAX_TRANSFER_WORK_STEPS_PER_FRAME = 8;
+    const int DEFAULT_MAX_ACTIVE_OUTGOING_TRANSFERS = 2;
     const int RELEASE_DIGEST_CACHE_TTL_MINUTES = 15;
     const int TRANSFER_WORK_QUEUE_LOG_INTERVAL_SECONDS = 5;
+    const int TRANSFER_PROGRESS_LOG_PERCENT_STEP = 25;
+    const int TRANSFER_PROGRESS_BAR_WIDTH = 10;
     delegate bool TryGetShareMetadataDelegate(
         string metadataKey,
         out PluginShareMetadataStore.PluginShareMetadata metadata,
@@ -349,6 +362,14 @@ internal static class Transference
     /// transfer work yields between network chunk sends and avoids main-thread stalls.
     /// </remarks>
     internal static int TransferWorkQueueBudgetMs { get; set; } = DEFAULT_TRANSFER_WORK_BUDGET_MS;
+    /// <summary>
+    /// Gets or sets the maximum transfer work steps processed per frame.
+    /// </summary>
+    internal static int MaxTransferWorkStepsPerFrame { get; set; } = DEFAULT_MAX_TRANSFER_WORK_STEPS_PER_FRAME;
+    /// <summary>
+    /// Gets or sets the maximum number of outgoing transfers that may actively send at once.
+    /// </summary>
+    internal static int MaxActiveOutgoingTransfers { get; set; } = DEFAULT_MAX_ACTIVE_OUTGOING_TRANSFERS;
     /// <summary>
     /// Defines how long an incoming transfer can remain idle before it is pruned.
     /// Keep this comfortably above <see cref="Const.CHUNK_DELAY" /> so slow networks or
@@ -371,6 +392,26 @@ internal static class Transference
     /// </summary>
     /// <returns>The timeout duration for idle incoming transfers.</returns>
     internal static TimeSpan IncomingTransferTimeout => incomingTransferTimeout;
+    /// <summary>
+    /// Applies the current VShare transfer throttling settings.
+    /// </summary>
+    /// <param name="settings">The settings snapshot to apply.</param>
+    internal static void ConfigureTransferSettings(VShareTransferSettings settings)
+    {
+        if (settings is null)
+        {
+            throw new ArgumentNullException(nameof(settings));
+        }
+
+        TransferWorkQueueBudgetMs = settings.TransferWorkBudgetMs;
+        MaxTransferWorkStepsPerFrame = settings.MaxTransferWorkStepsPerFrame;
+        MaxActiveOutgoingTransfers = settings.MaxActiveOutgoingTransfers;
+
+        lock (outgoingTransferLock)
+        {
+            outgoingTransferScheduler.SetMaxActiveTransfers(MaxActiveOutgoingTransfers);
+        }
+    }
     /// <summary>
     /// Occurs when an incoming transfer exceeds the idle timeout during cleanup.
     /// </summary>
@@ -405,6 +446,10 @@ internal static class Transference
         {
             ModuleRegistry.Subscribe<UserDisconnected>(OnUserDisconnected);
         }
+        else if (VWorld.IsClient)
+        {
+            API.Shared.VNetwork.OnClientSessionReset += ClearSharedModRequestConsent;
+        }
 
         StartOfferCleanup();
         StartIncomingTransferCleanup();
@@ -423,7 +468,7 @@ internal static class Transference
     {
         if (VWorld.IsServer && request.Clientbound)
         {
-            if (!TryResolveGitHubReleaseDigestForOffer(request.FileNameString, out string resolveError))
+            if (!TryResolveShareDigestForOffer(request.FileNameString, out string resolveError))
             {
                 VWorld.Log.LogWarning(
                     $"Transfer offer skipped for {request.FileNameString}: {resolveError}");
@@ -440,8 +485,8 @@ internal static class Transference
             pendingServerOffers[offerId] = new PendingServerOffer(offer, request, user.PlatformId, expiresAt);
         }
 
-        VWorld.Log.LogWarning(
-            $"Transfer offered ~ ID: {offerId} | Plugin: {offer.FileNameString} | Target: {user.PlatformId} | Expires: {expiresAt:HH\\:mm\\:ss}");
+        VWorld.Log.LogInfo(
+            $"[VShare] Offer sent: {offer.FileNameString} -> {user.PlatformId} (offer {offerId}, expires {expiresAt:HH\\:mm\\:ss}).");
 
         API.Shared.VNetwork.SendToClient(user, offer);
         return offerId;
@@ -494,7 +539,7 @@ internal static class Transference
                 $"Overwrite confirmation recorded for {offer.FileNameString} (offer {offer.Id}).");
         }
 
-        VWorld.Log.LogWarning($"Transfer accepted ~ ID: {offer.Id} | Plugin: {offer.FileNameString}");
+        VWorld.Log.LogInfo($"[VShare] Offer accepted: {offer.FileNameString} (offer {offer.Id}).");
         API.Shared.VNetwork.SendToServer(new TransferAccept(offerId));
         return true;
     }
@@ -531,7 +576,104 @@ internal static class Transference
 
     static void InternalTransferRequest(User user, TransferRequest request, Guid? transferId)
     {
-        TransferRoutine(user, request.FileNameString, request.Clientbound, request.Hotload, transferId).Run();
+        Guid id = transferId ?? Guid.NewGuid();
+        if (VWorld.IsServer && request.Clientbound)
+        {
+            QueueOutgoingTransfer(new QueuedOutgoingTransfer(id, user, request));
+            return;
+        }
+
+        TransferRoutine(user, request.FileNameString, request.Clientbound, request.Hotload, id).Run();
+    }
+
+    static void QueueOutgoingTransfer(QueuedOutgoingTransfer transfer)
+    {
+        bool started;
+        int activeCount;
+        int queuedCount;
+
+        lock (outgoingTransferLock)
+        {
+            started = outgoingTransferScheduler.EnqueueOrStart(transfer, StartOutgoingTransfer);
+            activeCount = outgoingTransferScheduler.ActiveCount;
+            queuedCount = outgoingTransferScheduler.QueuedCount;
+        }
+
+        if (!started)
+        {
+            VWorld.Log.LogInfo(
+                $"[VShare] Transfer queued: {transfer.Request.FileNameString} (transfer {transfer.TransferId}, " +
+                $"active {activeCount}, queued {queuedCount}, max {MaxActiveOutgoingTransfers}).");
+        }
+    }
+
+    static void StartOutgoingTransfer(QueuedOutgoingTransfer transfer)
+    {
+        VWorld.Log.LogDebug(
+            $"[VShare] Transfer dispatch starting: {transfer.Request.FileNameString} (transfer {transfer.TransferId}).");
+        OutgoingTransferRoutine(transfer).Run();
+    }
+
+    static IEnumerator OutgoingTransferRoutine(QueuedOutgoingTransfer transfer)
+    {
+        try
+        {
+            IEnumerator routine = TransferRoutine(
+                transfer.Target,
+                transfer.Request.FileNameString,
+                transfer.Request.Clientbound,
+                transfer.Request.Hotload,
+                transfer.TransferId);
+
+            while (routine.MoveNext())
+            {
+                yield return routine.Current;
+            }
+        }
+        finally
+        {
+            CompleteOutgoingTransfer(transfer.TransferId);
+        }
+    }
+
+    static void CompleteOutgoingTransfer(Guid transferId)
+    {
+        int activeCount;
+        int queuedCount;
+
+        lock (outgoingTransferLock)
+        {
+            outgoingTransferScheduler.Complete(transferId, StartOutgoingTransfer);
+            activeCount = outgoingTransferScheduler.ActiveCount;
+            queuedCount = outgoingTransferScheduler.QueuedCount;
+        }
+
+        VWorld.Log.LogDebug(
+            $"[VShare] Transfer dispatch completed: {transferId} (active {activeCount}, queued {queuedCount}).");
+    }
+
+    static int GetActiveOutgoingTransferCount()
+    {
+        lock (outgoingTransferLock)
+        {
+            return outgoingTransferScheduler.ActiveCount;
+        }
+    }
+
+    static int GetQueuedOutgoingTransferCount()
+    {
+        lock (outgoingTransferLock)
+        {
+            return outgoingTransferScheduler.QueuedCount;
+        }
+    }
+
+    static IReadOnlyList<QueuedOutgoingTransfer> RemoveQueuedOutgoingTransfersForUser(ulong targetId)
+    {
+        lock (outgoingTransferLock)
+        {
+            return outgoingTransferScheduler.RemoveQueued(transfer => transfer.TargetId == targetId);
+        }
     }
 
     /// <summary>
@@ -546,6 +688,8 @@ internal static class Transference
 
         ClientModSignature[] signatures = BuildClientModSignatures();
         API.Shared.VNetwork.SendToServer(new RequestSharedClientMods(signatures));
+        RecordSharedModRequestConsent(GetUtcNow());
+        VWorld.Log?.LogInfo($"Requested server-shared mods with {signatures.Length} local plugin signature(s).");
     }
 
     /// <summary>
@@ -567,6 +711,9 @@ internal static class Transference
         }
 
         ClientModLookup clientMods = BuildClientModLookup(request.ClientMods);
+        VWorld.Log.LogInfo(
+            $"Received shared mod request from {user.PlatformId}; " +
+            $"{request.ClientMods?.Length ?? 0} client signature(s), {sharedEntries.Count} staged share(s).");
 
         foreach (SharedModEntry entry in sharedEntries)
         {
@@ -614,7 +761,7 @@ internal static class Transference
                 yield break;
             }
 
-            yield return VerifyGitHubReleaseDigestRoutine(target, fileName, pluginName, rawBytes, result => verificationResult = result);
+            yield return VerifyShareDigestRoutine(target, fileName, pluginName, rawBytes, result => verificationResult = result);
             if (verificationResult.ShouldAbort)
             {
                 yield break;
@@ -673,7 +820,7 @@ internal static class Transference
                     yield return extractRoutine.Current;
                 }
 
-                VWorld.Log.LogWarning($"Extracted {fileName} to {Paths.GameRootPath}");
+                VWorld.Log.LogInfo($"[VShare] Extracted {fileName} to {Paths.GameRootPath}.");
 
                 yield break;
             }
@@ -683,7 +830,7 @@ internal static class Transference
             if (VShare.TryGetCachedDll(fileName, clientbound, out byte[] cachedBytes))
             {
                 string operation = clientbound ? "Sending" : "Writing";
-                VWorld.Log.LogWarning($"{operation} from cache directory...");
+                VWorld.Log.LogInfo($"[VShare] {operation} {fileName} from cache.");
 
                 if (!clientbound)
                 {
@@ -731,11 +878,11 @@ internal static class Transference
                     }
                     else
                     {
-                        VWorld.Log.LogWarning($"Download for {fileName} complete! ({DateTime.Now:HH\\:mm\\:ss})");
+                        VWorld.Log.LogInfo(FormatTransferCompleteMessage(fileName, fileBytes.Length));
 
                         if (hotload)
                         {
-                            VWorld.Log.LogWarning("Loading plugin...");
+                            VWorld.Log.LogInfo($"[VShare] Loading plugin: {fileName}.");
                             LogHotloadPluginResult(filePath, LoadPlugin(filePath));
                         }
                     }
@@ -774,7 +921,7 @@ internal static class Transference
         byte[] releaseDigestBytes = verificationResult.ReleaseDigestBytes ?? [];
         ushort chunkSize = Const.PACKET_BYTES;
 
-        VWorld.Log.LogWarning($"Starting plugin transfer ~ ID: {id} | Plugin: {fileName} | Size: {fileBytes.Length.PrettyBytes()} ({DateTime.Now.TimeOfDay})");
+        VWorld.Log.LogInfo(FormatTransferDispatchMessage(fileName, fileBytes.Length, id));
 
         TransferSession init = new(
             id,
@@ -800,7 +947,7 @@ internal static class Transference
     }
     static void OnTransferSession(User sender, TransferSession session)
     {
-        VWorld.Log.LogWarning($"Starting plugin transfer ~ ID: {session.Id} | Plugin: {session.FileNameString} | Size: {session.TotalBytes.PrettyBytes()} ({DateTime.Now.TimeOfDay})");
+        VWorld.Log.LogInfo(FormatTransferStartMessage(session.FileNameString, session.TotalBytes));
         RegisterIncomingTransfer(session, sender.PlatformId);
     }
     /// <summary>
@@ -843,8 +990,15 @@ internal static class Transference
             pendingClientOffers[offer.Id] = new PendingClientOffer(offer, expiresAt);
         }
 
-        VWorld.Log.LogWarning(
-            $"Transfer offer received ~ ID: {offer.Id} | Plugin: {offer.FileNameString} | Expires: {expiresAt:HH\\:mm\\:ss}");
+        VWorld.Log.LogInfo(
+            $"[VShare] Offer received: {offer.FileNameString} (offer {offer.Id}, expires {expiresAt:HH\\:mm\\:ss}).");
+
+        if (ShouldAutoAcceptSharedModOffer(offer, GetUtcNow()))
+        {
+            VWorld.Log.LogInfo(
+                $"[VShare] Auto-accepting requested share: {offer.FileNameString} (offer {offer.Id}).");
+            TryAcceptTransferOffer(offer.Id);
+        }
     }
     /// <summary>
     /// Handles a client acceptance by starting the transfer on the server.
@@ -886,8 +1040,8 @@ internal static class Transference
             pendingServerOffers.Remove(accept.Id);
         }
 
-        VWorld.Log.LogWarning(
-            $"Transfer accepted ~ ID: {accept.Id} | Plugin: {pendingOffer.Offer.FileNameString} | Target: {user.PlatformId}");
+        VWorld.Log.LogInfo(
+            $"[VShare] Offer accepted: {pendingOffer.Offer.FileNameString} by {user.PlatformId} (offer {accept.Id}).");
         InternalTransferRequest(user, pendingOffer.Request, pendingOffer.Offer.Id);
     }
     /// <summary>
@@ -942,6 +1096,11 @@ internal static class Transference
             chunk.ChunkBytes));
     }
     static void OnTransferComplete(TransferComplete complete)
+    {
+        EnqueueTransferWorkItem(new TransferCompleteWorkItem(complete));
+    }
+
+    static void ProcessTransferComplete(TransferComplete complete)
     {
         IncomingTransfer incoming = null;
         bool ok = false;
@@ -1011,6 +1170,13 @@ internal static class Transference
         {
             VWorld.Log.LogWarning(
                 $"Incoming transfer cleared on disconnect ~ ID: {transfer.Id} | Plugin: {transfer.FileName} | Target: {targetId}");
+        }
+
+        IReadOnlyList<QueuedOutgoingTransfer> removedOutgoingTransfers = RemoveQueuedOutgoingTransfersForUser(targetId);
+        foreach (QueuedOutgoingTransfer transfer in removedOutgoingTransfers)
+        {
+            VWorld.Log.LogWarning(
+                $"Queued outgoing transfer cleared on disconnect ~ ID: {transfer.TransferId} | Plugin: {transfer.Request.FileNameString} | Target: {targetId}");
         }
     }
     static IEnumerator IncomingRoutine(TransferComplete complete, IncomingTransfer incoming)
@@ -1114,7 +1280,7 @@ internal static class Transference
                 yield return extractRoutine.Current;
             }
 
-            VWorld.Log.LogWarning($"Extracted {incoming.FileName} to {Paths.GameRootPath}");
+            VWorld.Log.LogInfo($"[VShare] Extracted {incoming.FileName} to {Paths.GameRootPath}.");
             DeleteTemporaryFileIfPresent(tempFilePath);
 
             yield break;
@@ -1123,13 +1289,11 @@ internal static class Transference
         try
         {
             FinalizeIncomingFile(tempFilePath, filePath, allowOverwrite);
-            VWorld.Log.LogWarning(
-                $"Download for {incoming.FileName} complete! " +
-                $"({DateTime.Now:HH\\:mm\\:ss})");
+            VWorld.Log.LogInfo(FormatTransferCompleteMessage(incoming.FileName, incoming.TotalBytes));
 
             if (complete.Hotload)
             {
-                VWorld.Log.LogWarning("Loading plugin...");
+                VWorld.Log.LogInfo($"[VShare] Loading plugin: {incoming.FileName}.");
                 LogHotloadPluginResult(filePath, LoadPlugin(filePath));
             }
         }
@@ -1235,7 +1399,7 @@ internal static class Transference
             return new TransferWorkQueueProgress(0, 0, false);
         }
 
-        TransferWorkQueueProgress Progress = transferWorkQueue.Process(timeBudget);
+        TransferWorkQueueProgress Progress = transferWorkQueue.Process(timeBudget, MaxTransferWorkStepsPerFrame);
         LogTransferWorkQueueProgress(Progress);
         return Progress;
     }
@@ -1260,10 +1424,13 @@ internal static class Transference
             return;
         }
 
-        VWorld.Log?.LogWarning(
+        VWorld.Log?.LogDebug(
             $"Transfer work queue processed {progress.StepsProcessed} step(s), " +
             $"{progress.TransfersCompleted} transfer(s) completed, " +
-            $"budget exceeded: {progress.BudgetExceeded}.");
+            $"budget exceeded: {progress.BudgetExceeded}, " +
+            $"step cap exceeded: {progress.StepLimitExceeded}, " +
+            $"active outgoing: {GetActiveOutgoingTransferCount()}, " +
+            $"queued outgoing: {GetQueuedOutgoingTransferCount()}.");
     }
 
     /// <summary>
@@ -1273,7 +1440,7 @@ internal static class Transference
     /// <returns><c>true</c> when logging should occur; otherwise, <c>false</c>.</returns>
     static bool ShouldLogTransferWorkQueueProgress(TransferWorkQueueProgress progress)
     {
-        if (!progress.BudgetExceeded)
+        if (!progress.BudgetExceeded && !progress.StepLimitExceeded)
         {
             return false;
         }
@@ -1286,6 +1453,100 @@ internal static class Transference
 
         lastTransferWorkQueueLogUtc = Now;
         return true;
+    }
+
+    /// <summary>
+    /// Formats the client-side start line for an incoming VShare transfer.
+    /// </summary>
+    /// <param name="fileName">The staged file name.</param>
+    /// <param name="totalBytes">The total transfer size.</param>
+    /// <returns>A concise operator-facing log line.</returns>
+    static string FormatTransferStartMessage(string fileName, int totalBytes)
+        => $"[VShare] Transfer started: {fileName} ({totalBytes.PrettyBytes()}).";
+
+    /// <summary>
+    /// Formats the server-side dispatch line for an outgoing VShare transfer.
+    /// </summary>
+    /// <param name="fileName">The staged file name.</param>
+    /// <param name="totalBytes">The total transfer size.</param>
+    /// <param name="transferId">The transfer identifier.</param>
+    /// <returns>A concise operator-facing log line.</returns>
+    static string FormatTransferDispatchMessage(string fileName, int totalBytes, Guid transferId)
+        => $"[VShare] Sending {fileName} ({totalBytes.PrettyBytes()}, transfer {transferId}).";
+
+    /// <summary>
+    /// Formats a coarse incoming VShare download progress line.
+    /// </summary>
+    /// <param name="fileName">The staged file name.</param>
+    /// <param name="receivedBytes">The received byte count.</param>
+    /// <param name="totalBytes">The total transfer size.</param>
+    /// <returns>A concise operator-facing progress line.</returns>
+    static string FormatTransferProgressMessage(string fileName, int receivedBytes, int totalBytes)
+    {
+        int percent = CalculateTransferPercent(receivedBytes, totalBytes);
+        int filled = Math.Clamp(percent * TRANSFER_PROGRESS_BAR_WIDTH / 100, 0, TRANSFER_PROGRESS_BAR_WIDTH);
+        string progressBar =
+            new string('#', filled) +
+            new string('-', TRANSFER_PROGRESS_BAR_WIDTH - filled);
+
+        return
+            $"[VShare] Downloading {fileName} [{progressBar}] {percent}% " +
+            $"({receivedBytes.PrettyBytes()} / {totalBytes.PrettyBytes()}).";
+    }
+
+    /// <summary>
+    /// Determines whether an incoming transfer crossed a new progress milestone.
+    /// </summary>
+    /// <param name="receivedBytes">The received byte count.</param>
+    /// <param name="totalBytes">The total transfer size.</param>
+    /// <param name="lastLoggedPercent">The last logged milestone.</param>
+    /// <param name="nextLoggedPercent">The next milestone to remember.</param>
+    /// <returns><c>true</c> when progress should be logged.</returns>
+    static bool ShouldLogTransferProgress(
+        int receivedBytes,
+        int totalBytes,
+        int lastLoggedPercent,
+        out int nextLoggedPercent)
+    {
+        int percent = CalculateTransferPercent(receivedBytes, totalBytes);
+        int milestone = Math.Min(
+            75,
+            percent / TRANSFER_PROGRESS_LOG_PERCENT_STEP * TRANSFER_PROGRESS_LOG_PERCENT_STEP);
+
+        if (milestone <= 0 || milestone <= lastLoggedPercent)
+        {
+            nextLoggedPercent = lastLoggedPercent;
+            return false;
+        }
+
+        nextLoggedPercent = milestone;
+        return true;
+    }
+
+    /// <summary>
+    /// Formats the client-side completion line for a VShare download.
+    /// </summary>
+    /// <param name="fileName">The staged file name.</param>
+    /// <param name="totalBytes">The total transfer size.</param>
+    /// <returns>A concise operator-facing completion line.</returns>
+    static string FormatTransferCompleteMessage(string fileName, int totalBytes)
+        => $"[VShare] Download complete: {fileName} ({totalBytes.PrettyBytes()}, digest verified).";
+
+    /// <summary>
+    /// Calculates a clamped integer transfer percentage.
+    /// </summary>
+    /// <param name="receivedBytes">The received byte count.</param>
+    /// <param name="totalBytes">The total transfer size.</param>
+    /// <returns>A value from 0 through 100.</returns>
+    static int CalculateTransferPercent(int receivedBytes, int totalBytes)
+    {
+        if (totalBytes <= 0)
+        {
+            return 0;
+        }
+
+        double percent = Math.Floor((double)Math.Max(0, receivedBytes) * 100 / totalBytes);
+        return Math.Clamp((int)percent, 0, 100);
     }
 
     /// <summary>
@@ -1462,6 +1723,21 @@ internal static class Transference
     }
 
     /// <summary>
+    /// Gets the number of bytes received for a transfer under test.
+    /// </summary>
+    /// <param name="transferId">The transfer identifier.</param>
+    /// <returns>The received byte count, or <c>-1</c> when the transfer is not tracked.</returns>
+    internal static int GetIncomingReceivedBytesForTesting(Guid transferId)
+    {
+        lock (incomingLock)
+        {
+            return incomingTransfers.TryGetValue(transferId, out IncomingTransfer incoming)
+                ? incoming.ReceivedBytes
+                : -1;
+        }
+    }
+
+    /// <summary>
     /// Resets incoming transfer state for testing.
     /// </summary>
     internal static void ResetIncomingTransferStateForTesting()
@@ -1507,6 +1783,26 @@ internal static class Transference
     internal static void EnqueueTransferWorkItemForTesting(ITransferWorkItem workItem)
     {
         EnqueueTransferWorkItem(workItem);
+    }
+
+    /// <summary>
+    /// Queues an incoming transfer chunk for testing.
+    /// </summary>
+    /// <param name="transferId">The transfer identifier.</param>
+    /// <param name="index">The chunk index.</param>
+    /// <param name="bytes">The chunk payload.</param>
+    internal static void QueueTransferChunkForTesting(Guid transferId, int index, byte[] bytes)
+    {
+        EnqueueTransferWorkItem(new TransferChunkReceiveWorkItem(transferId, index, bytes));
+    }
+
+    /// <summary>
+    /// Queues transfer completion for testing.
+    /// </summary>
+    /// <param name="complete">The completion packet.</param>
+    internal static void QueueTransferCompleteForTesting(TransferComplete complete)
+    {
+        OnTransferComplete(complete);
     }
 
     /// <summary>
@@ -1616,25 +1912,25 @@ internal static class Transference
     }
     static void LogFailure(Guid transferId)
     {
-        VWorld.Log.LogWarning($"Transfer failed! ({DateTime.Now:HH\\:mm\\:ss})");
+        VWorld.Log?.LogWarning($"Transfer failed! ({DateTime.Now:HH\\:mm\\:ss})");
 
         lock (incomingLock)
         {
             if (!incomingTransfers.TryGetValue(transferId, out var incoming))
             {
-                VWorld.Log.LogWarning($"No transfer session found for {transferId}.");
+                VWorld.Log?.LogWarning($"No transfer session found for {transferId}.");
                 return;
             }
 
             if (incoming.IsComplete == false)
             {
-                VWorld.Log.LogWarning(
+                VWorld.Log?.LogWarning(
                     $"{incoming.TotalBytes.PrettyBytes()} bytes expected, only {incoming.ReceivedBytes.PrettyBytes()} bytes received...");
             }
 
             if (!incoming.Verify())
             {
-                VWorld.Log.LogWarning("Didn't pass SHA-256 verification...");
+                VWorld.Log?.LogWarning("Didn't pass SHA-256 verification...");
             }
 
             // VNetwork.SendToServer(new FileAck(transferId, false));
@@ -1880,6 +2176,35 @@ internal static class Transference
     internal static HotloadPluginResult TryLoadPluginForTesting(string filePath)
         => TryLoadPlugin(filePath);
 
+    internal static string FormatTransferStartMessageForTesting(string fileName, int totalBytes)
+        => FormatTransferStartMessage(fileName, totalBytes);
+
+    internal static string FormatTransferProgressMessageForTesting(
+        string fileName,
+        int receivedBytes,
+        int totalBytes)
+        => FormatTransferProgressMessage(fileName, receivedBytes, totalBytes);
+
+    internal static bool ShouldLogTransferProgressForTesting(
+        int receivedBytes,
+        int totalBytes,
+        int lastLoggedPercent,
+        out int nextLoggedPercent)
+        => ShouldLogTransferProgress(receivedBytes, totalBytes, lastLoggedPercent, out nextLoggedPercent);
+
+    internal static string FormatTransferCompleteMessageForTesting(string fileName, int totalBytes)
+        => FormatTransferCompleteMessage(fileName, totalBytes);
+
+    internal static byte[] CompressBytesSynchronously(byte[] bytes)
+    {
+        byte[] result = null;
+        TransferCompressionWorkItem workItem = new(Guid.Empty, bytes, output => result = output);
+
+        while (!workItem.TryExecuteStep()) { }
+
+        return result;
+    }
+
     internal static Assembly ResolveHotloadAssemblyForTesting(string filePath, out bool reusedLoadedAssembly)
     {
         AssemblyName assemblyName = AssemblyName.GetAssemblyName(filePath);
@@ -1991,6 +2316,7 @@ internal static class Transference
         public int ExpectedChunkCount;
         public int ReceivedBytes { get; private set; }
         public int ReceivedChunkCount { get; private set; }
+        int LastLoggedProgressPercent { get; set; }
         public bool IsComplete => ReceivedBytes >= TotalBytes && ReceivedChunkCount == ExpectedChunkCount;
         /// <summary>
         /// Gets the UTC timestamp when the transfer was created.
@@ -2058,6 +2384,16 @@ internal static class Transference
             _chunks[idx] = bytes;
             ReceivedBytes += bytes.Length;
             ReceivedChunkCount++;
+
+            if (ShouldLogTransferProgress(
+                ReceivedBytes,
+                TotalBytes,
+                LastLoggedProgressPercent,
+                out int nextLoggedProgressPercent))
+            {
+                LastLoggedProgressPercent = nextLoggedProgressPercent;
+                VWorld.Log?.LogInfo(FormatTransferProgressMessage(FileName, ReceivedBytes, TotalBytes));
+            }
         }
         /// <summary>
         /// Concatenates the ordered chunks into a single payload buffer.
@@ -2577,6 +2913,45 @@ internal static class Transference
                 }
             }
 
+            completed = true;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Schedules incoming transfer completion after queued chunk receive work.
+    /// </summary>
+    sealed class TransferCompleteWorkItem : ITransferWorkItem
+    {
+        readonly TransferComplete complete;
+        bool completed;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="TransferCompleteWorkItem"/> class.
+        /// </summary>
+        /// <param name="complete">The transfer completion packet.</param>
+        public TransferCompleteWorkItem(TransferComplete complete)
+        {
+            this.complete = complete;
+        }
+
+        /// <summary>
+        /// Gets the transfer identifier.
+        /// </summary>
+        public Guid TransferId => complete.Id;
+
+        /// <summary>
+        /// Executes the completion step.
+        /// </summary>
+        /// <returns><c>true</c> after completion processing runs.</returns>
+        public bool TryExecuteStep()
+        {
+            if (completed)
+            {
+                return true;
+            }
+
+            ProcessTransferComplete(complete);
             completed = true;
             return true;
         }
@@ -3220,6 +3595,26 @@ internal static class Transference
         public bool IsZip { get; } = isZip;
     }
 
+    internal readonly record struct StagedReleaseIdentity(
+        string Owner,
+        string Repo,
+        string Tag,
+        string AssetName,
+        string MetadataKey,
+        bool FromMetadata);
+
+    readonly struct StagedReleaseProvenance(
+        StagedReleaseIdentity identity,
+        string releaseDigest,
+        string localSha256,
+        byte[] releaseDigestBytes)
+    {
+        public StagedReleaseIdentity Identity { get; } = identity;
+        public string ReleaseDigest { get; } = releaseDigest;
+        public string LocalSha256 { get; } = localSha256;
+        public byte[] ReleaseDigestBytes { get; } = releaseDigestBytes;
+    }
+
     readonly record struct ReleaseAssetCacheKey(string Owner, string Repo, string Tag, string AssetName);
 
     readonly struct ReleaseAssetCacheEntry(
@@ -3230,50 +3625,156 @@ internal static class Transference
         public DateTimeOffset ExpiresAt { get; } = expiresAt;
     }
 
-    /// <summary>
-    /// Resolves the GitHub Release identity for a staged plugin.
-    /// </summary>
-    /// <param name="pluginName">The plugin name without extension.</param>
-    /// <param name="identity">The resolved release identity.</param>
-    /// <param name="errorMessage">An error message describing a failed resolution.</param>
-    /// <returns><c>true</c> when the identity is resolved; otherwise <c>false</c>.</returns>
-    static bool TryResolveGitHubReleaseIdentity(
-        string pluginName,
-        out GitHubReleaseClient.GitHubReleaseIdentity identity,
+    internal static bool TryResolveStagedReleaseIdentityForTesting(
+        string stagedFileName,
+        IReadOnlyDictionary<string, PluginShareMetadataStore.PluginShareMetadata> entries,
+        out StagedReleaseIdentity identity,
+        out string errorMessage)
+        => TryResolveStagedReleaseIdentity(
+            stagedFileName,
+            (string metadataKey, out PluginShareMetadataStore.PluginShareMetadata metadata, out string lookupError) =>
+            {
+                if (entries.TryGetValue(metadataKey, out metadata))
+                {
+                    lookupError = string.Empty;
+                    return true;
+                }
+
+                lookupError = $"Share metadata was not found for '{metadataKey}'.";
+                return false;
+            },
+            out identity,
+            out errorMessage);
+
+    internal static bool TryValidateStagedReleaseDigestForTesting(
+        string fileName,
+        byte[] rawBytes,
+        string releaseDigest,
+        out string localSha256,
+        out byte[] releaseDigestBytes,
+        out string errorMessage)
+        => TryValidateStagedReleaseDigest(
+            fileName,
+            rawBytes,
+            releaseDigest,
+            out localSha256,
+            out releaseDigestBytes,
+            out errorMessage);
+
+    static bool TryResolveStagedReleaseIdentity(
+        string stagedFileName,
+        TryGetShareMetadataDelegate tryGetMetadata,
+        out StagedReleaseIdentity identity,
         out string errorMessage)
     {
-        if (TryResolveGitHubReleaseIdentityFromStagedAsset(pluginName, out identity, out errorMessage))
+        if (string.IsNullOrWhiteSpace(stagedFileName))
         {
-            return true;
+            identity = default;
+            errorMessage = "Staged asset file name was empty.";
+            return false;
         }
 
-        string stagedAssetError = errorMessage;
-        if (_shareMetadataStore.TryGetPluginMetadata(pluginName, out PluginShareMetadataStore.PluginShareMetadata metadata, out string metadataError))
+        if (!IsStagedAssetFile(stagedFileName))
         {
-            if (!TryParseGitHubRepo(metadata.GitHubRepo, out string owner, out string repo, out errorMessage))
+            identity = default;
+            errorMessage = $"Staged asset '{stagedFileName}' is not a supported shareable file.";
+            return false;
+        }
+
+        var metadataErrors = new List<string>();
+        foreach (string metadataKey in GetShareMetadataKeysForStagedFileName(stagedFileName))
+        {
+            if (!tryGetMetadata(metadataKey, out PluginShareMetadataStore.PluginShareMetadata metadata, out string metadataError))
             {
-                identity = default;
-                return false;
+                metadataErrors.Add(metadataError);
+                continue;
             }
 
-            if (string.IsNullOrWhiteSpace(metadata.GitHubTag))
+            if (TryResolveStagedReleaseIdentityFromMetadata(
+                    stagedFileName,
+                    metadataKey,
+                    metadata,
+                    out identity,
+                    out errorMessage))
             {
-                identity = default;
-                errorMessage = $"Share metadata for '{pluginName}' is missing GitHubTag.";
-                return false;
+                return true;
             }
 
-            identity = new GitHubReleaseClient.GitHubReleaseIdentity(owner, repo, metadata.GitHubTag);
+            metadataErrors.Add(errorMessage);
+        }
+
+        if (TryResolveGitHubReleaseIdentityFromStagedFileName(
+                stagedFileName,
+                out GitHubReleaseClient.GitHubReleaseIdentity fallbackIdentity,
+                out string stagedAssetError))
+        {
+            identity = new StagedReleaseIdentity(
+                fallbackIdentity.Owner,
+                fallbackIdentity.Repo,
+                fallbackIdentity.Tag,
+                Path.GetFileName(stagedFileName),
+                fallbackIdentity.Repo,
+                false);
             errorMessage = string.Empty;
             return true;
         }
 
         identity = default;
         errorMessage =
-            $"GitHub Release identity could not be resolved for '{pluginName}'. " +
-            $"Staged asset resolution failed: {stagedAssetError} " +
-            $"Share metadata resolution failed: {metadataError}";
+            $"GitHub Release identity could not be resolved for '{stagedFileName}'. " +
+            $"Metadata resolution failed: {string.Join(" ", metadataErrors)} " +
+            $"Staged asset resolution failed: {stagedAssetError}";
         return false;
+    }
+
+    static bool TryResolveStagedReleaseIdentityFromMetadata(
+        string stagedFileName,
+        string metadataKey,
+        PluginShareMetadataStore.PluginShareMetadata metadata,
+        out StagedReleaseIdentity identity,
+        out string errorMessage)
+    {
+        if (!TryParseGitHubRepo(metadata.GitHubRepo, out string owner, out string repo, out errorMessage))
+        {
+            identity = default;
+            errorMessage = $"Share metadata for '{metadataKey}' is invalid: {errorMessage}";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(metadata.GitHubTag))
+        {
+            identity = default;
+            errorMessage = $"Share metadata for '{metadataKey}' is missing GitHubTag.";
+            return false;
+        }
+
+        string assetName = string.IsNullOrWhiteSpace(metadata.GitHubAssetName)
+            ? Path.GetFileName(stagedFileName)
+            : metadata.GitHubAssetName.Trim();
+
+        if (string.IsNullOrWhiteSpace(assetName))
+        {
+            identity = default;
+            errorMessage = $"Share metadata for '{metadataKey}' did not resolve a GitHub Release asset name.";
+            return false;
+        }
+
+        if (!IsStagedAssetFile(assetName))
+        {
+            identity = default;
+            errorMessage = $"Share metadata for '{metadataKey}' references unsupported GitHubAssetName '{assetName}'.";
+            return false;
+        }
+
+        identity = new StagedReleaseIdentity(
+            owner,
+            repo,
+            metadata.GitHubTag,
+            assetName,
+            metadataKey,
+            true);
+        errorMessage = string.Empty;
+        return true;
     }
 
     /// <summary>
@@ -3473,32 +3974,145 @@ internal static class Transference
     /// <param name="fileName">The staged asset file name.</param>
     /// <param name="errorMessage">An error message describing a failed resolution.</param>
     /// <returns><c>true</c> when the digest is resolved; otherwise <c>false</c>.</returns>
-    static bool TryResolveGitHubReleaseDigestForOffer(string fileName, out string errorMessage)
+    static bool TryResolveShareDigestForOffer(string fileName, out string errorMessage)
     {
+        if (!TryGetServerStagedFilePath(fileName, out string stagedFilePath, out errorMessage))
+        {
+            return false;
+        }
+
+        byte[] rawBytes;
+        try
+        {
+            rawBytes = File.ReadAllBytes(stagedFilePath);
+        }
+        catch (Exception ex) when (IsStagedModFileAccessException(ex))
+        {
+            errorMessage = $"Unable to read staged asset '{fileName}' for provenance verification: {ex.Message}";
+            return false;
+        }
+
+        return TryResolveStagedReleaseProvenance(
+            fileName,
+            rawBytes,
+            out _,
+            out errorMessage);
+    }
+
+    static bool TryGetServerStagedFilePath(string fileName, out string stagedFilePath, out string errorMessage)
+    {
+        stagedFilePath = string.Empty;
         if (string.IsNullOrWhiteSpace(fileName))
         {
             errorMessage = "File name was empty.";
             return false;
         }
 
-        if (!TryResolveGitHubReleaseIdentityFromStagedFileName(
-                fileName,
-                out GitHubReleaseClient.GitHubReleaseIdentity identity,
+        if (!string.Equals(fileName, Path.GetFileName(fileName), StringComparison.Ordinal))
+        {
+            errorMessage = $"File name '{fileName}' must not contain a directory path.";
+            return false;
+        }
+
+        if (!Directory.Exists(VShare.ServerModsPath))
+        {
+            Directory.CreateDirectory(VShare.ServerModsPath);
+            errorMessage =
+                $"Server share folder was missing and has been created at '{VShare.ServerModsPath}'. " +
+                "Stage .dll/.zip files here before retrying.";
+            return false;
+        }
+
+        string candidatePath = Path.Combine(VShare.ServerModsPath, fileName);
+        if (!File.Exists(candidatePath) || !IsStagedAssetFile(candidatePath))
+        {
+            errorMessage = $"No supported staged asset named '{fileName}' was found in '{VShare.ServerModsPath}'.";
+            return false;
+        }
+
+        stagedFilePath = candidatePath;
+        errorMessage = string.Empty;
+        return true;
+    }
+
+    static bool TryResolveStagedReleaseProvenance(
+        string stagedFileName,
+        byte[] rawBytes,
+        out StagedReleaseProvenance provenance,
+        out string errorMessage)
+    {
+        if (!TryResolveStagedReleaseIdentity(
+                stagedFileName,
+                _shareMetadataStore.TryGetPluginMetadata,
+                out StagedReleaseIdentity identity,
                 out string identityError))
         {
-            errorMessage = $"GitHub Release identity could not be resolved for '{fileName}': {identityError}";
+            provenance = default;
+            errorMessage = identityError;
             return false;
         }
 
-        if (!TryResolveReleaseAssetDigest(identity, fileName, out string digest, out string digestError))
+        var gitHubIdentity = new GitHubReleaseClient.GitHubReleaseIdentity(
+            identity.Owner,
+            identity.Repo,
+            identity.Tag);
+
+        if (!TryResolveReleaseAssetDigest(gitHubIdentity, identity.AssetName, out string digest, out string digestError))
         {
-            errorMessage = $"GitHub Release asset digest lookup failed for '{fileName}': {digestError}";
+            provenance = default;
+            errorMessage = $"GitHub Release asset digest lookup failed for '{identity.AssetName}': {digestError}";
             return false;
         }
 
-        if (!TryConvertHexStringToBytes(digest, out _))
+        if (!TryValidateStagedReleaseDigest(
+                stagedFileName,
+                rawBytes,
+                digest,
+                out string localSha256,
+                out byte[] releaseDigestBytes,
+                out string validationError))
         {
-            errorMessage = $"GitHub Release asset digest for '{fileName}' was not a valid hex string.";
+            provenance = default;
+            errorMessage = validationError;
+            return false;
+        }
+
+        provenance = new StagedReleaseProvenance(identity, digest, localSha256, releaseDigestBytes);
+        errorMessage = string.Empty;
+        return true;
+    }
+
+    static bool TryValidateStagedReleaseDigest(
+        string fileName,
+        byte[] rawBytes,
+        string releaseDigest,
+        out string localSha256,
+        out byte[] releaseDigestBytes,
+        out string errorMessage)
+    {
+        localSha256 = string.Empty;
+        releaseDigestBytes = [];
+
+        if (rawBytes is null)
+        {
+            errorMessage = $"GitHub Release asset digest could not be computed for {fileName}: staged bytes were missing.";
+            return false;
+        }
+
+        if (!TryConvertHexStringToBytes(releaseDigest, out releaseDigestBytes))
+        {
+            releaseDigestBytes = [];
+            errorMessage = $"GitHub Release asset digest for {fileName} was not a valid SHA-256 hex string.";
+            return false;
+        }
+
+        localSha256 = ComputeSha256Hex(rawBytes);
+        if (!string.Equals(localSha256, releaseDigest, StringComparison.OrdinalIgnoreCase))
+        {
+            releaseDigestBytes = [];
+            errorMessage =
+                $"GitHub Release asset digest mismatch for {fileName}. " +
+                $"Expected {releaseDigest}, but local file hash is {localSha256}.";
             return false;
         }
 
@@ -3515,7 +4129,7 @@ internal static class Transference
     /// <param name="rawBytes">The raw, uncompressed bytes used for hash comparison.</param>
     /// <param name="onComplete">Callback invoked with the verification result.</param>
     /// <returns>An enumerator for coroutine execution.</returns>
-    static IEnumerator VerifyGitHubReleaseDigestRoutine(
+    static IEnumerator VerifyShareDigestRoutine(
         User target,
         string fileName,
         string pluginName,
@@ -3524,7 +4138,11 @@ internal static class Transference
     {
         bool isZip = fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
 
-        if (!TryResolveGitHubReleaseIdentity(pluginName, out GitHubReleaseClient.GitHubReleaseIdentity identity, out string resolveError))
+        if (!TryResolveStagedReleaseIdentity(
+                fileName,
+                _shareMetadataStore.TryGetPluginMetadata,
+                out StagedReleaseIdentity releaseIdentity,
+                out string resolveError))
         {
             string message = $"GitHub Release asset digest metadata not resolved for {pluginName}: {resolveError}";
             VWorld.Log.LogWarning(message);
@@ -3540,8 +4158,11 @@ internal static class Transference
         object lookupLock = new();
 
         _gitHubReleaseClient.BeginReleaseAssetDigestLookup(
-            identity,
-            fileName,
+            new GitHubReleaseClient.GitHubReleaseIdentity(
+                releaseIdentity.Owner,
+                releaseIdentity.Repo,
+                releaseIdentity.Tag),
+            releaseIdentity.AssetName,
             CancellationToken.None,
             result =>
             {
@@ -3574,33 +4195,32 @@ internal static class Transference
             yield break;
         }
 
-        string localHash = ComputeSha256Hex(rawBytes);
-        if (!string.Equals(localHash, digestResult.Digest, StringComparison.OrdinalIgnoreCase))
+        if (!TryValidateStagedReleaseDigest(
+                fileName,
+                rawBytes,
+                digestResult.Digest,
+                out _,
+                out byte[] hashBytes,
+                out string validationError))
         {
-            string message =
-                $"Transfer aborted: GitHub Release asset digest mismatch for {fileName}. " +
-                $"Expected tag {digestResult.Tag} digest {digestResult.Digest}, " +
-                $"but local file hash is {localHash}.";
-
-            VWorld.Log.LogWarning(message);
-            if (!VShare.TryInvalidateCachedEntry(fileName, pluginName, isZip, true, out string invalidateError))
+            VWorld.Log.LogWarning(validationError);
+            bool invalidated = false;
+            if (validationError.Contains("digest mismatch", StringComparison.OrdinalIgnoreCase) &&
+                !VShare.TryInvalidateCachedEntry(fileName, pluginName, isZip, true, out string invalidateError))
             {
                 VWorld.Log.LogError($"Cache invalidation failed for {fileName}: {invalidateError}");
             }
+            else if (validationError.Contains("digest mismatch", StringComparison.OrdinalIgnoreCase))
+            {
+                invalidated = true;
+            }
 
+            string retryMessage = invalidated
+                ? " Cache entry was invalidated. Please re-download the release asset from GitHub and try again."
+                : " Please retry later.";
             SendTransferFailureMessage(
                 target,
-                $"{message} Cache entry was invalidated. Please re-download the release asset from GitHub and try again.");
-            onComplete(new ReleaseDigestVerificationResult(true, digestResult.Digest, digestResult.Tag, []));
-            yield break;
-        }
-
-        if (!TryConvertHexStringToBytes(digestResult.Digest, out byte[] hashBytes))
-        {
-            VWorld.Log.LogWarning($"GitHub Release asset digest for {pluginName} was not a valid hex string.");
-            SendTransferFailureMessage(
-                target,
-                $"Transfer aborted: GitHub Release asset digest for {pluginName} was not a valid hex string. Please retry later.");
+                $"{validationError}{retryMessage}");
             onComplete(new ReleaseDigestVerificationResult(true, digestResult.Digest, digestResult.Tag, []));
             yield break;
         }
@@ -3745,32 +4365,43 @@ internal static class Transference
             string baseName = Path.GetFileNameWithoutExtension(fileName);
             bool isZip = fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
 
-            if (!TryResolveGitHubReleaseIdentityFromStagedFileName(
+            byte[] rawBytes;
+            try
+            {
+                rawBytes = File.ReadAllBytes(modFile);
+            }
+            catch (Exception ex) when (IsStagedModFileAccessException(ex))
+            {
+                VWorld.Log.LogWarning($"Skipping shared mod {fileName}: unable to read staged bytes for provenance verification: {ex.Message}");
+                continue;
+            }
+
+            if (!TryResolveStagedReleaseProvenance(
                     fileName,
-                    out GitHubReleaseClient.GitHubReleaseIdentity identity,
-                    out string identityError))
+                    rawBytes,
+                    out StagedReleaseProvenance provenance,
+                    out string provenanceError))
             {
-                VWorld.Log.LogWarning($"Skipping shared mod {fileName}: {identityError}");
+                VWorld.Log.LogWarning($"Skipping shared mod {fileName}: {provenanceError}");
                 continue;
             }
 
-            if (!TryResolveReleaseAssetDigest(identity, fileName, out string digest, out string digestError))
-            {
-                VWorld.Log.LogWarning($"Skipping shared mod {fileName}: {digestError}");
-                continue;
-            }
-
-            if (!TryConvertHexStringToBytes(digest, out _))
-            {
-                VWorld.Log.LogWarning($"Skipping shared mod {fileName}: GitHub Release asset digest was not valid hex.");
-                continue;
-            }
-
-            entries.Add(new SharedModEntry(fileName, baseName, identity.Repo, digest, isZip));
+            entries.Add(new SharedModEntry(
+                fileName,
+                baseName,
+                provenance.Identity.MetadataKey,
+                provenance.LocalSha256,
+                isZip));
         }
 
         return entries;
     }
+
+    internal static bool IsStagedModFileAccessExceptionForTesting(Exception ex)
+        => IsStagedModFileAccessException(ex);
+
+    static bool IsStagedModFileAccessException(Exception ex)
+        => ex is IOException or UnauthorizedAccessException or SecurityException;
 
     /// <summary>
     /// Resolves a GitHub Release asset digest, caching results to reduce API calls.
@@ -3824,6 +4455,91 @@ internal static class Transference
 
         CacheReleaseAssetDigest(identity, assetFileName, result);
         return result;
+    }
+
+    static bool TryResolveLocalShareDigest(
+        string pluginName,
+        out string digest,
+        out byte[] hashBytes,
+        out bool configured,
+        out string errorMessage)
+        => TryResolveLocalShareDigest(
+            [pluginName],
+            _shareMetadataStore.TryGetPluginMetadata,
+            out digest,
+            out hashBytes,
+            out configured,
+            out errorMessage);
+
+    static bool TryResolveLocalShareDigest(
+        IReadOnlyList<string> metadataKeys,
+        out string digest,
+        out byte[] hashBytes,
+        out bool configured,
+        out string errorMessage)
+        => TryResolveLocalShareDigest(
+            metadataKeys,
+            _shareMetadataStore.TryGetPluginMetadata,
+            out digest,
+            out hashBytes,
+            out configured,
+            out errorMessage);
+
+    static bool TryResolveLocalShareDigest(
+        IReadOnlyList<string> metadataKeys,
+        TryGetShareMetadataDelegate tryGetMetadata,
+        out string digest,
+        out byte[] hashBytes,
+        out bool configured,
+        out string errorMessage)
+    {
+        digest = string.Empty;
+        hashBytes = [];
+        configured = false;
+
+        foreach (string metadataKey in metadataKeys)
+        {
+            if (!tryGetMetadata(metadataKey, out PluginShareMetadataStore.PluginShareMetadata metadata, out _))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(metadata.LocalSha256))
+            {
+                continue;
+            }
+
+            configured = true;
+            return TryNormalizeLocalShareDigest(metadata.LocalSha256, out digest, out hashBytes, out errorMessage);
+        }
+
+        errorMessage = string.Empty;
+        return false;
+    }
+
+    static bool TryNormalizeLocalShareDigest(
+        string value,
+        out string digest,
+        out byte[] hashBytes,
+        out string errorMessage)
+    {
+        hashBytes = [];
+        if (!GitHubReleaseClient.TryNormalizeSha256Digest(value, out digest, out errorMessage))
+        {
+            errorMessage = $"Share metadata LocalSha256 is invalid: {errorMessage}";
+            return false;
+        }
+
+        if (!TryConvertHexStringToBytes(digest, out hashBytes))
+        {
+            errorMessage = "Share metadata LocalSha256 was not a valid SHA-256 hex string.";
+            digest = string.Empty;
+            return false;
+        }
+
+        digest = digest.ToUpperInvariant();
+        errorMessage = string.Empty;
+        return true;
     }
 
     /// <summary>
@@ -4012,19 +4728,21 @@ internal static class Transference
     /// <param name="stagedFileName">The staged asset file name.</param>
     /// <returns>The ordered metadata keys to try.</returns>
     internal static IReadOnlyList<string> GetShareMetadataKeysForTesting(string stagedFileName)
+        => GetShareMetadataKeysForStagedFileName(stagedFileName);
+
+    static IReadOnlyList<string> GetShareMetadataKeysForStagedFileName(string stagedFileName)
     {
         string baseName = Path.GetFileNameWithoutExtension(stagedFileName);
-        string metadataBaseName = string.Empty;
-        if (TryResolveGitHubReleaseIdentityFromStagedFileName(
-                stagedFileName,
-                out GitHubReleaseClient.GitHubReleaseIdentity identity,
-                out _))
-        {
-            metadataBaseName = identity.Repo;
-        }
-
-        return GetShareMetadataKeys(baseName, metadataBaseName);
+        return GetShareMetadataKeys(baseName, GetShareMetadataBaseNameFromStagedFileName(stagedFileName));
     }
+
+    static string GetShareMetadataBaseNameFromStagedFileName(string stagedFileName)
+        => TryResolveGitHubReleaseIdentityFromStagedFileName(
+            stagedFileName,
+            out GitHubReleaseClient.GitHubReleaseIdentity identity,
+            out _)
+            ? identity.Repo
+            : string.Empty;
 
     internal static bool TrySelectClientShareMetadataForTesting(
         IReadOnlyList<string> metadataKeys,
@@ -4098,6 +4816,38 @@ internal static class Transference
     static bool IsSharedModHotloadAllowed(bool isZip, PluginShareMetadataStore.PluginShareMetadata metadata)
         => !isZip && metadata.HotloadAllowed && IsClientShareAllowed(metadata);
 
+    static void RecordSharedModRequestConsent(DateTime requestedAtUtc)
+        => RecordSharedModRequestConsent(requestedAtUtc, API.Shared.VNetwork.ClientSessionGeneration);
+
+    static void RecordSharedModRequestConsent(DateTime requestedAtUtc, long clientSessionGeneration)
+    {
+        sharedModRequestConsentExpiresAtUtc = requestedAtUtc.Add(offerTimeout);
+        sharedModRequestConsentClientSessionGeneration = clientSessionGeneration;
+    }
+
+    static bool ShouldAutoAcceptSharedModOffer(TransferOffer offer, DateTime nowUtc)
+        => ShouldAutoAcceptSharedModOffer(offer, nowUtc, API.Shared.VNetwork.ClientSessionGeneration);
+
+    static bool ShouldAutoAcceptSharedModOffer(TransferOffer offer, DateTime nowUtc, long clientSessionGeneration)
+        => offer.Clientbound
+        && clientSessionGeneration == sharedModRequestConsentClientSessionGeneration
+        && nowUtc <= sharedModRequestConsentExpiresAtUtc;
+
+    internal static void RecordSharedModRequestConsentForTesting(DateTime requestedAtUtc, long clientSessionGeneration)
+        => RecordSharedModRequestConsent(requestedAtUtc, clientSessionGeneration);
+
+    internal static void ClearSharedModRequestConsentForTesting()
+        => ClearSharedModRequestConsent();
+
+    static void ClearSharedModRequestConsent()
+    {
+        sharedModRequestConsentExpiresAtUtc = DateTime.MinValue;
+        sharedModRequestConsentClientSessionGeneration = -1;
+    }
+
+    internal static bool ShouldAutoAcceptSharedModOfferForTesting(TransferOffer offer, DateTime nowUtc, long clientSessionGeneration)
+        => ShouldAutoAcceptSharedModOffer(offer, nowUtc, clientSessionGeneration);
+
     /// <summary>
     /// Exposes shared-mod hotload eligibility for focused unit coverage.
     /// </summary>
@@ -4108,6 +4858,38 @@ internal static class Transference
         bool isZip,
         PluginShareMetadataStore.PluginShareMetadata metadata)
         => IsSharedModHotloadAllowed(isZip, metadata);
+
+    internal static bool TryNormalizeLocalShareDigestForTesting(
+        string value,
+        out string digest,
+        out byte[] hashBytes,
+        out string errorMessage)
+        => TryNormalizeLocalShareDigest(value, out digest, out hashBytes, out errorMessage);
+
+    internal static bool TryResolveLocalShareDigestForTesting(
+        IReadOnlyList<string> metadataKeys,
+        IReadOnlyDictionary<string, PluginShareMetadataStore.PluginShareMetadata> entries,
+        out string digest,
+        out byte[] hashBytes,
+        out bool configured,
+        out string errorMessage)
+        => TryResolveLocalShareDigest(
+            metadataKeys,
+            (string metadataKey, out PluginShareMetadataStore.PluginShareMetadata entry, out string metadataError) =>
+            {
+                if (entries.TryGetValue(metadataKey, out entry))
+                {
+                    metadataError = string.Empty;
+                    return true;
+                }
+
+                metadataError = $"Share metadata was not found for '{metadataKey}'.";
+                return false;
+            },
+            out digest,
+            out hashBytes,
+            out configured,
+            out errorMessage);
 
     /// <summary>
     /// Checks whether a tag collection includes the client tag.

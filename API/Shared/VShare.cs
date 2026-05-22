@@ -360,12 +360,7 @@ internal static class VShare
     /// <param name="raw">The raw bytes to compress.</param>
     /// <returns>The compressed byte array.</returns>
     static byte[] Compress(byte[] raw)
-    {
-        byte[] result = null;
-        var e = Transference.CompressChunkRoutine(raw, b => result = b);
-        while (e.MoveNext()) { }
-        return result;
-    }
+        => Transference.CompressBytesSynchronously(raw);
 
     /// <summary>
     /// Attempts to load or cache compressed DLL bytes.

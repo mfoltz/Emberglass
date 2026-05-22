@@ -63,6 +63,6 @@ internal class ClientChatSystemPatch
         }
 
         _receiveDiagnosticsEmitted++;
-        VWorld.Log.LogInfo($"[VNetwork.ClientReceive] {message}");
+        VWorld.Log.LogDebug($"[VNetwork.ClientReceive] {message}");
     }
 }

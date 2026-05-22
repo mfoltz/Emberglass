@@ -1,0 +1,1 @@
+﻿Emberglass	3ABCE59F5B3770303FEACF655E16F656B71FC234A256F8FE48FCCDFF058324A8	C:\Users\mitch\source\Repos\Emberglass\.codex\runs\bepinex-plugin-set\custom-prefab-client\client\20260520-212224\stage\BepInEx\plugins\Emberglass.dll

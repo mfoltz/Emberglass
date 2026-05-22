@@ -8,6 +8,8 @@ internal static class ObserverSystemRegistry
 {
     static readonly Type[] _serverObserverSystems =
     [
+        typeof(CustomPrefabCleanupSystem),
+        typeof(CustomPrefabRegistrationSystem),
         typeof(PlayerCharacterPresenceObserverSystem)
     ];
 

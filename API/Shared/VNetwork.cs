@@ -15,6 +15,8 @@ public static class VNetwork
     /// Use <see cref="OnReady" /> or <see cref="OnClientReady" /> before sending packets.
     /// </remarks>
     public static bool IsReady { get; private set; }
+    internal static long ClientSessionGeneration { get; private set; }
+    internal static event Action OnClientSessionReset;
 
     /// <summary>
     /// Raised on the server when a client completes the network handshake and is ready for packets.
@@ -290,6 +292,7 @@ public static class VNetwork
 
     internal static void RaiseClientReady()
     {
+        ClientSessionGeneration++;
         IsReady = true;
         OnClientReady?.Invoke();
     }
@@ -299,7 +302,9 @@ public static class VNetwork
         if (VWorld.IsClient)
         {
             RequestResponse.FaultPendingClientRequests("the client session disconnected or reset.");
+            ClientSessionGeneration++;
             IsReady = false;
+            OnClientSessionReset?.Invoke();
         }
     }
 
