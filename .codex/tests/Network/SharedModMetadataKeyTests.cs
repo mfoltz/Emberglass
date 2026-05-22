@@ -97,6 +97,7 @@ public sealed class SharedModMetadataKeyTests
             Array.Empty<string>(),
             Array.Empty<string>(),
             sourceDigest);
+
         var entries = new Dictionary<string, PluginShareMetadataStore.PluginShareMetadata>(StringComparer.OrdinalIgnoreCase)
         {
             ["Eclipse"] = metadata
@@ -114,6 +115,42 @@ public sealed class SharedModMetadataKeyTests
         Assert.True(configured);
         Assert.Equal("35E0048CA629F5D3A52B6368A838CF1A23D70D131B40A203C1A277C7E5C6E22A", digest);
         Assert.Equal(32, hashBytes.Length);
+        Assert.Equal(string.Empty, errorMessage);
+    }
+
+    /// <summary>
+    /// Ensures plain release asset names can resolve GitHub identity through ShareMetadata.json.
+    /// </summary>
+    [Fact]
+    public void TryResolveStagedReleaseIdentity_UsesMetadataForPlainAssetName()
+    {
+        PluginShareMetadataStore.PluginShareMetadata metadata = new(
+            "mfoltz/Eclipse",
+            "v1.3.17-pre",
+            "Eclipse.dll",
+            true,
+            true,
+            Array.Empty<string>(),
+            Array.Empty<string>(),
+            string.Empty);
+        var entries = new Dictionary<string, PluginShareMetadataStore.PluginShareMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Eclipse"] = metadata
+        };
+
+        bool resolved = Transference.TryResolveStagedReleaseIdentityForTesting(
+            "Eclipse.dll",
+            entries,
+            out Transference.StagedReleaseIdentity identity,
+            out string errorMessage);
+
+        Assert.True(resolved);
+        Assert.Equal("mfoltz", identity.Owner);
+        Assert.Equal("Eclipse", identity.Repo);
+        Assert.Equal("v1.3.17-pre", identity.Tag);
+        Assert.Equal("Eclipse.dll", identity.AssetName);
+        Assert.Equal("Eclipse", identity.MetadataKey);
+        Assert.True(identity.FromMetadata);
         Assert.Equal(string.Empty, errorMessage);
     }
 }

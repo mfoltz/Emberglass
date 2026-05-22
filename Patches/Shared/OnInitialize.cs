@@ -45,7 +45,7 @@ internal static class GameBootstrapPatch
                 OptionsManager.AddButton(
                     "emberglass.request_shared_mods",
                     "Request Shared Mods",
-                    "Request server-shared mods for this client (requires your consent).",
+                    Transference.GetSharedModsMenuDescription,
                     MyPluginInfo.PLUGIN_NAME,
                     () =>
                     {

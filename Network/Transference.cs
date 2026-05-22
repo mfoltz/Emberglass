@@ -3,8 +3,10 @@ using System.IO.Compression;
 using System.Reflection;
 using System.Security;
 using System.Security.Cryptography;
+using System.Text;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
+using Emberglass.API.Client;
 using Emberglass.API.Shared;
 using Emberglass.Utilities;
 using ProjectM;
@@ -109,6 +111,87 @@ internal static class Transference
         public RequestSharedClientMods(ClientModSignature[] clientMods)
         {
             ClientMods = clientMods ?? [];
+        }
+    }
+
+    /// <summary>
+    /// Describes the server-side shared mods currently advertised to a client.
+    /// </summary>
+    public sealed class SharedClientModPreview
+    {
+        public SharedClientModPreviewEntry[] Entries { get; set; } = [];
+
+        public SharedClientModPreview()
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new preview payload for the client options menu.
+        /// </summary>
+        /// <param name="entries">The advertised shared-mod entries.</param>
+        public SharedClientModPreview(SharedClientModPreviewEntry[] entries)
+        {
+            Entries = entries ?? [];
+        }
+    }
+
+    /// <summary>
+    /// Describes one shared mod shown in the client options-menu details.
+    /// </summary>
+    public sealed class SharedClientModPreviewEntry
+    {
+        public string DisplayName { get; set; } = string.Empty;
+        public string GitHubRepo { get; set; } = string.Empty;
+        public string GitHubTag { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public bool IsZip { get; set; }
+        public bool Hotload { get; set; }
+
+        public SharedClientModPreviewEntry()
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new shared-mod preview entry.
+        /// </summary>
+        /// <param name="displayName">The human-readable mod name.</param>
+        /// <param name="gitHubRepo">The GitHub repository identity.</param>
+        /// <param name="gitHubTag">The GitHub release tag.</param>
+        /// <param name="isZip">Whether the staged asset is a ZIP package.</param>
+        /// <param name="hotload">Whether runtime load is enabled for this offer.</param>
+        public SharedClientModPreviewEntry(
+            string displayName,
+            string gitHubRepo,
+            string gitHubTag,
+            bool isZip,
+            bool hotload)
+            : this(displayName, gitHubRepo, gitHubTag, string.Empty, isZip, hotload)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new shared-mod preview entry.
+        /// </summary>
+        /// <param name="displayName">The human-readable mod name.</param>
+        /// <param name="gitHubRepo">The GitHub repository identity.</param>
+        /// <param name="gitHubTag">The GitHub release tag.</param>
+        /// <param name="fileName">The staged asset file name.</param>
+        /// <param name="isZip">Whether the staged asset is a ZIP package.</param>
+        /// <param name="hotload">Whether runtime load is enabled for this offer.</param>
+        public SharedClientModPreviewEntry(
+            string displayName,
+            string gitHubRepo,
+            string gitHubTag,
+            string fileName,
+            bool isZip,
+            bool hotload)
+        {
+            DisplayName = displayName ?? string.Empty;
+            GitHubRepo = gitHubRepo ?? string.Empty;
+            GitHubTag = gitHubTag ?? string.Empty;
+            FileName = fileName ?? string.Empty;
+            IsZip = isZip;
+            Hotload = hotload;
         }
     }
 
@@ -338,6 +421,9 @@ internal static class Transference
     static readonly Dictionary<ReleaseAssetCacheKey, ReleaseAssetCacheEntry> releaseAssetDigestCache = [];
     static readonly object releaseAssetDigestCacheLock = new();
     static readonly HashSet<string> _hotloadedPluginGuids = new(StringComparer.Ordinal);
+    static SharedClientModPreviewEntry[] _latestSharedClientModPreview;
+    static readonly HashSet<string> _sharedModAutoAcceptFileNames = new(StringComparer.OrdinalIgnoreCase);
+    static DateTime _sharedModAutoAcceptUntilUtc = DateTime.MinValue;
     const string CLIENT_TAG = "client";
     const string EMBERGLASS_PLUGIN_NAME = "Emberglass";
     const string STAGED_ASSET_DOUBLE_DELIMITER = "__";
@@ -350,10 +436,18 @@ internal static class Transference
     const int TRANSFER_WORK_QUEUE_LOG_INTERVAL_SECONDS = 5;
     const int TRANSFER_PROGRESS_LOG_PERCENT_STEP = 25;
     const int TRANSFER_PROGRESS_BAR_WIDTH = 10;
+    const int MAX_SHARED_MOD_PREVIEW_ENTRIES = 8;
+    const int SHARED_MOD_AUTO_ACCEPT_WINDOW_SECONDS = 15;
+    const string REQUEST_SHARED_MODS_BUTTON_ID = "emberglass.request_shared_mods";
+    const string SHARED_MODS_MENU_HEADER = "Server shared mods:";
     delegate bool TryGetShareMetadataDelegate(
         string metadataKey,
         out PluginShareMetadataStore.PluginShareMetadata metadata,
         out string errorMessage);
+    delegate bool TryGetClientShareMetadataDelegate(
+        SharedModEntry entry,
+        out PluginShareMetadataStore.PluginShareMetadata metadata,
+        out string skipReason);
     /// <summary>
     /// Gets or sets the per-frame time budget, in milliseconds, for processing transfer work items.
     /// </summary>
@@ -441,10 +535,12 @@ internal static class Transference
         Register<TransferComplete>(Direction.Clientbound, (u, o) => OnTransferComplete((TransferComplete)o));
         Register<TransferChunk>(Direction.Clientbound, (u, o) => OnTransferChunk((TransferChunk)o));
         Register<RequestSharedClientMods>(Direction.Serverbound, (u, o) => HandleSharedModsRequest(u, (RequestSharedClientMods)o));
+        Register<SharedClientModPreview>(Direction.Clientbound, (u, o) => OnSharedClientModPreview((SharedClientModPreview)o));
 
         if (VWorld.IsServer)
         {
             ModuleRegistry.Subscribe<UserDisconnected>(OnUserDisconnected);
+            VNetwork.OnReady += OnVNetworkReady;
         }
         else if (VWorld.IsClient)
         {
@@ -687,9 +783,31 @@ internal static class Transference
         }
 
         ClientModSignature[] signatures = BuildClientModSignatures();
-        API.Shared.VNetwork.SendToServer(new RequestSharedClientMods(signatures));
+        ArmSharedModAutoAcceptWindow(_latestSharedClientModPreview);
         RecordSharedModRequestConsent(GetUtcNow());
+        API.Shared.VNetwork.SendToServer(new RequestSharedClientMods(signatures));
         VWorld.Log?.LogInfo($"Requested server-shared mods with {signatures.Length} local plugin signature(s).");
+    }
+
+    /// <summary>
+    /// Gets the current VShare menu detail text for the request button.
+    /// </summary>
+    /// <returns>The hover/details text to show in the options menu.</returns>
+    public static string GetSharedModsMenuDescription()
+        => BuildSharedModsMenuDescription(_latestSharedClientModPreview);
+
+    /// <summary>
+    /// Sends the current VShare catalog after a client completes the authenticated session.
+    /// </summary>
+    /// <param name="user">The newly ready client user.</param>
+    static void OnVNetworkReady(User user)
+    {
+        if (!VWorld.IsServer)
+        {
+            return;
+        }
+
+        SendSharedClientModCatalog(user);
     }
 
     /// <summary>
@@ -714,6 +832,7 @@ internal static class Transference
         VWorld.Log.LogInfo(
             $"Received shared mod request from {user.PlatformId}; " +
             $"{request.ClientMods?.Length ?? 0} client signature(s), {sharedEntries.Count} staged share(s).");
+        var eligibleOffers = new List<SharedModOfferCandidate>();
 
         foreach (SharedModEntry entry in sharedEntries)
         {
@@ -738,7 +857,12 @@ internal static class Transference
             }
 
             bool hotload = IsSharedModHotloadAllowed(entry.IsZip, metadata);
-            SendTransferOffer(user, new TransferRequest(entry.FileName.AsSpan(), clientbound: true, hotload));
+            eligibleOffers.Add(new SharedModOfferCandidate(entry, metadata, hotload));
+        }
+
+        foreach (SharedModOfferCandidate offer in eligibleOffers)
+        {
+            SendTransferOffer(user, new TransferRequest(offer.Entry.FileName.AsSpan(), clientbound: true, offer.Hotload));
         }
     }
     static IEnumerator TransferRoutine(User target, string fileName, bool clientbound, bool hotload = false, Guid? transferId = null)
@@ -996,8 +1120,28 @@ internal static class Transference
         if (ShouldAutoAcceptSharedModOffer(offer, GetUtcNow()))
         {
             VWorld.Log.LogInfo(
-                $"[VShare] Auto-accepting requested share: {offer.FileNameString} (offer {offer.Id}).");
+                $"[VShare] Auto-accepting catalog-listed requested share: {offer.FileNameString} (offer {offer.Id}).");
             TryAcceptTransferOffer(offer.Id);
+        }
+    }
+
+    /// <summary>
+    /// Updates the client-side VShare menu preview after a server response.
+    /// </summary>
+    /// <param name="preview">The latest server preview payload.</param>
+    static void OnSharedClientModPreview(SharedClientModPreview preview)
+    {
+        if (!VWorld.IsClient)
+        {
+            return;
+        }
+
+        _latestSharedClientModPreview = preview.Entries ?? [];
+        VWorld.Log.LogInfo(
+            $"[VShare] Received server shared-mod catalog with {_latestSharedClientModPreview.Length} entries.");
+        if (VWorld.IsClient)
+        {
+            OptionsManager.RefreshButtonDescription(REQUEST_SHARED_MODS_BUTTON_ID);
         }
     }
     /// <summary>
@@ -1102,31 +1246,18 @@ internal static class Transference
 
     static void ProcessTransferComplete(TransferComplete complete)
     {
-        IncomingTransfer incoming = null;
-        bool ok = false;
-
         lock (incomingLock)
         {
-            if (!incomingTransfers.TryGetValue(complete.Id, out incoming))
+            if (!incomingTransfers.TryGetValue(complete.Id, out var incoming))
             {
                 VWorld.Log.LogWarning($"Received completion for unknown transfer {complete.Id}.");
                 return;
             }
 
-            ok = incoming.IsComplete && incoming.Verify();
-            if (ok)
-            {
-                incomingTransfers.Remove(complete.Id);
-            }
+            incoming.MarkCompletionReceived(complete);
         }
 
-        if (!ok)
-        {
-            LogFailure(complete.Id);
-            return;
-        }
-
-        IncomingRoutine(complete, incoming).Run();
+        TryFinalizeIncomingTransfer(complete.Id);
     }
 
     /// <summary>
@@ -1910,6 +2041,43 @@ internal static class Transference
 
         API.Shared.VNetwork.SendToServer(new TransferDecline(offerId, TransferDeclineReason.OfferExpired));
     }
+    static bool TryFinalizeIncomingTransfer(Guid transferId)
+    {
+        IncomingTransfer incoming;
+        TransferComplete complete;
+        bool ok;
+
+        lock (incomingLock)
+        {
+            if (!incomingTransfers.TryGetValue(transferId, out incoming)
+                || !incoming.HasCompletion)
+            {
+                return false;
+            }
+
+            if (!incoming.IsComplete)
+            {
+                return false;
+            }
+
+            complete = incoming.Completion;
+            ok = incoming.Verify();
+            if (ok)
+            {
+                incomingTransfers.Remove(transferId);
+            }
+        }
+
+        if (!ok)
+        {
+            LogFailure(transferId);
+            return true;
+        }
+
+        IncomingRoutine(complete, incoming).Run();
+        return true;
+    }
+
     static void LogFailure(Guid transferId)
     {
         VWorld.Log?.LogWarning($"Transfer failed! ({DateTime.Now:HH\\:mm\\:ss})");
@@ -2318,6 +2486,8 @@ internal static class Transference
         public int ReceivedChunkCount { get; private set; }
         int LastLoggedProgressPercent { get; set; }
         public bool IsComplete => ReceivedBytes >= TotalBytes && ReceivedChunkCount == ExpectedChunkCount;
+        public bool HasCompletion { get; private set; }
+        public TransferComplete Completion { get; private set; }
         /// <summary>
         /// Gets the UTC timestamp when the transfer was created.
         /// </summary>
@@ -2347,6 +2517,15 @@ internal static class Transference
             StartedUtc = GetUtcNow();
             LastChunkUtc = StartedUtc;
             SourcePlatformId = sourcePlatformId;
+        }
+        /// <summary>
+        /// Records that the transfer sender has finished sending chunks.
+        /// </summary>
+        /// <param name="complete">The completion packet received from the sender.</param>
+        public void MarkCompletionReceived(TransferComplete complete)
+        {
+            Completion = complete;
+            HasCompletion = true;
         }
         /// <summary>
         /// Adds a chunk to the transfer when the index is valid and not already present.
@@ -2905,12 +3084,19 @@ internal static class Transference
                 return true;
             }
 
+            bool shouldFinalize = false;
             lock (incomingLock)
             {
                 if (incomingTransfers.TryGetValue(TransferId, out var incoming))
                 {
                     incoming.AddChunk(index, bytes);
+                    shouldFinalize = incoming.HasCompletion && incoming.IsComplete;
                 }
+            }
+
+            if (shouldFinalize)
+            {
+                TryFinalizeIncomingTransfer(TransferId);
             }
 
             completed = true;
@@ -3584,6 +3770,313 @@ internal static class Transference
     {
         public HashSet<string> FileNames { get; } = fileNames;
         public HashSet<string> Hashes { get; } = hashes;
+    }
+
+    /// <summary>
+    /// Sends the current server-advertised shared-mod catalog to the client.
+    /// </summary>
+    /// <param name="user">The target user.</param>
+    static void SendSharedClientModCatalog(User user)
+    {
+        if (!VWorld.IsServer)
+        {
+            return;
+        }
+
+        SharedClientModPreviewEntry[] entries =
+            BuildSharedClientModCatalogEntries(GetServerShareEntries());
+
+        VWorld.Log.LogInfo(
+            $"[VShare] Sending server shared-mod catalog with {entries.Length} entries to {user.PlatformId}.");
+        SendSharedClientModPreview(user, entries);
+    }
+
+    /// <summary>
+    /// Sends the current shared-mod catalog preview to the client.
+    /// </summary>
+    /// <param name="user">The target user.</param>
+    /// <param name="entries">The preview entries to show.</param>
+    static void SendSharedClientModPreview(User user, SharedClientModPreviewEntry[] entries)
+    {
+        API.Shared.VNetwork.SendToClient(user, new SharedClientModPreview(entries));
+    }
+
+    /// <summary>
+    /// Builds client-facing catalog entries from server-staged shared mods.
+    /// </summary>
+    /// <param name="sharedEntries">The server-staged shared mods.</param>
+    /// <returns>The catalog entries to advertise to the client.</returns>
+    static SharedClientModPreviewEntry[] BuildSharedClientModCatalogEntries(IReadOnlyList<SharedModEntry> sharedEntries)
+        => BuildSharedClientModCatalogEntries(sharedEntries, TryGetClientShareMetadata);
+
+    static SharedClientModPreviewEntry[] BuildSharedClientModCatalogEntries(
+        IReadOnlyList<SharedModEntry> sharedEntries,
+        TryGetClientShareMetadataDelegate tryGetMetadata)
+    {
+        if (sharedEntries is null || sharedEntries.Count == 0)
+        {
+            return [];
+        }
+
+        var entries = new List<SharedClientModPreviewEntry>(sharedEntries.Count);
+        foreach (SharedModEntry entry in sharedEntries)
+        {
+            if (!tryGetMetadata(
+                    entry,
+                    out PluginShareMetadataStore.PluginShareMetadata metadata,
+                    out string skipReason))
+            {
+                VWorld.Log?.LogWarning($"Skipping shared mod {entry.FileName}: {skipReason}");
+                continue;
+            }
+
+            if (!IsFileNameWithinLimit(entry.FileName))
+            {
+                VWorld.Log?.LogWarning($"Skipping shared mod {entry.FileName}: file name exceeds packet length.");
+                continue;
+            }
+
+            bool hotload = IsSharedModHotloadAllowed(entry.IsZip, metadata);
+            entries.Add(CreateSharedClientModCatalogEntry(entry, metadata, hotload));
+        }
+
+        return entries.ToArray();
+    }
+
+    /// <summary>
+    /// Creates a client-facing catalog entry from a server-staged mod.
+    /// </summary>
+    /// <param name="entry">The server-staged mod entry.</param>
+    /// <param name="metadata">The resolved share metadata.</param>
+    /// <param name="hotload">Whether runtime load is enabled for the mod.</param>
+    /// <returns>The catalog entry to send to the client.</returns>
+    static SharedClientModPreviewEntry CreateSharedClientModCatalogEntry(
+        SharedModEntry entry,
+        PluginShareMetadataStore.PluginShareMetadata metadata,
+        bool hotload)
+        => new(
+            string.IsNullOrWhiteSpace(entry.MetadataBaseName)
+                ? entry.BaseName
+                : entry.MetadataBaseName,
+            metadata.GitHubRepo,
+            metadata.GitHubTag,
+            entry.FileName,
+            entry.IsZip,
+            hotload);
+
+    /// <summary>
+    /// Builds the VShare request-button detail text from the latest server preview.
+    /// </summary>
+    /// <param name="entries">The latest preview entries, or <c>null</c> before a server check.</param>
+    /// <returns>The options-menu detail text.</returns>
+    static string BuildSharedModsMenuDescription(IReadOnlyList<SharedClientModPreviewEntry> entries)
+    {
+        if (entries is null)
+        {
+            return SHARED_MODS_MENU_HEADER +
+                "\n- Waiting for server details.";
+        }
+
+        if (entries.Count == 0)
+        {
+            return SHARED_MODS_MENU_HEADER +
+                "\n- No server-shared mods advertised by this server.";
+        }
+
+        var builder = new StringBuilder(SHARED_MODS_MENU_HEADER);
+
+        int entryCount = Math.Min(entries.Count, MAX_SHARED_MOD_PREVIEW_ENTRIES);
+        for (int i = 0; i < entryCount; i++)
+        {
+            SharedClientModPreviewEntry entry = entries[i];
+            string displayName = SanitizePreviewText(entry.DisplayName, "Unknown mod");
+            string tag = SanitizePreviewText(entry.GitHubTag, "unknown version");
+            string repo = SanitizePreviewText(entry.GitHubRepo, "unknown repository");
+            string fileName = SanitizePreviewText(entry.FileName, entry.IsZip ? "unknown.zip" : "unknown.dll");
+            string fileType = entry.IsZip ? "ZIP" : "DLL";
+            string runtimeLoad = entry.Hotload ? "enabled" : "disabled";
+
+            builder.AppendLine();
+            builder.Append("- ");
+            builder.Append(displayName);
+            builder.Append(' ');
+            builder.Append(tag);
+            builder.AppendLine();
+            builder.Append("  Source: ");
+            builder.AppendLine(repo);
+            builder.Append("  File: ");
+            builder.Append(fileName);
+            builder.Append(" (");
+            builder.Append(fileType);
+            builder.AppendLine(")");
+            builder.Append("  Runtime load: ");
+            builder.AppendLine(runtimeLoad);
+        }
+
+        if (entries.Count > entryCount)
+        {
+            builder.Append("- ");
+            builder.Append(entries.Count - entryCount);
+            builder.AppendLine(" more server-shared mods available.");
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// Exposes the VShare menu description formatter to focused tests.
+    /// </summary>
+    /// <param name="entries">The preview entries to format.</param>
+    /// <returns>The formatted options-menu detail text.</returns>
+    internal static string BuildSharedModsMenuDescriptionForTesting(IReadOnlyList<SharedClientModPreviewEntry> entries)
+        => BuildSharedModsMenuDescription(entries);
+
+    internal static SharedClientModPreviewEntry[] BuildSharedClientModCatalogEntriesForTesting(
+        IReadOnlyList<(string FileName, string BaseName, string MetadataBaseName, string Sha256, bool IsZip)> stagedEntries,
+        IReadOnlyDictionary<string, PluginShareMetadataStore.PluginShareMetadata> metadataEntries)
+    {
+        SharedModEntry[] sharedEntries = stagedEntries
+            .Select(entry => new SharedModEntry(
+                entry.FileName,
+                entry.BaseName,
+                entry.MetadataBaseName,
+                entry.Sha256,
+                entry.IsZip))
+            .ToArray();
+
+        return BuildSharedClientModCatalogEntries(
+            sharedEntries,
+            (SharedModEntry entry, out PluginShareMetadataStore.PluginShareMetadata metadata, out string skipReason) =>
+                TrySelectClientShareMetadata(
+                    GetShareMetadataKeys(entry),
+                    (string metadataKey, out PluginShareMetadataStore.PluginShareMetadata candidate, out string errorMessage) =>
+                    {
+                        if (metadataEntries.TryGetValue(metadataKey, out candidate))
+                        {
+                            errorMessage = string.Empty;
+                            return true;
+                        }
+
+                        errorMessage = $"Share metadata was not found for '{metadataKey}'.";
+                        return false;
+                    },
+                    out metadata,
+                    out skipReason));
+    }
+
+    static void ArmSharedModAutoAcceptWindow(IReadOnlyList<SharedClientModPreviewEntry> entries)
+    {
+        lock (pendingOfferLock)
+        {
+            _sharedModAutoAcceptFileNames.Clear();
+            if (entries is not null)
+            {
+                foreach (SharedClientModPreviewEntry entry in entries)
+                {
+                    if (!string.IsNullOrWhiteSpace(entry.FileName))
+                    {
+                        _sharedModAutoAcceptFileNames.Add(entry.FileName);
+                    }
+                }
+            }
+
+            _sharedModAutoAcceptUntilUtc = GetUtcNow().AddSeconds(SHARED_MOD_AUTO_ACCEPT_WINDOW_SECONDS);
+        }
+
+        VWorld.Log.LogInfo(
+            $"[VShare] Armed shared-mod auto-accept window for {_sharedModAutoAcceptFileNames.Count} catalog entries.");
+    }
+
+    static void TryAutoAcceptSharedModOffer(TransferOffer offer)
+    {
+        if (!ShouldAutoAcceptSharedModOffer(offer.FileNameString, GetUtcNow()))
+        {
+            return;
+        }
+
+        VWorld.Log.LogInfo($"[VShare] Auto-accepting catalog-listed shared mod offer for {offer.FileNameString}.");
+        TryAcceptTransferOffer(offer.Id);
+    }
+
+    static bool ShouldAutoAcceptSharedModOffer(string fileName, DateTime utcNow)
+    {
+        lock (pendingOfferLock)
+        {
+            return ShouldAutoAcceptSharedModOffer(
+                fileName,
+                utcNow,
+                _sharedModAutoAcceptUntilUtc,
+                _sharedModAutoAcceptFileNames);
+        }
+    }
+
+    static bool ShouldAutoAcceptSharedModOffer(
+        string fileName,
+        DateTime utcNow,
+        DateTime autoAcceptUntilUtc,
+        IReadOnlyCollection<string> catalogFileNames)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            catalogFileNames is null ||
+            catalogFileNames.Count == 0 ||
+            utcNow > autoAcceptUntilUtc)
+        {
+            return false;
+        }
+
+        return catalogFileNames.Contains(fileName, StringComparer.OrdinalIgnoreCase);
+    }
+
+    internal static bool ShouldAutoAcceptSharedModOfferForTesting(
+        string fileName,
+        DateTime utcNow,
+        DateTime autoAcceptUntilUtc,
+        IReadOnlyCollection<string> catalogFileNames)
+        => ShouldAutoAcceptSharedModOffer(fileName, utcNow, autoAcceptUntilUtc, catalogFileNames);
+
+    internal static void SetSharedModAutoAcceptCatalogForTesting(
+        IEnumerable<string> fileNames,
+        DateTime autoAcceptUntilUtc)
+    {
+        lock (pendingOfferLock)
+        {
+            _sharedModAutoAcceptFileNames.Clear();
+            foreach (string fileName in fileNames ?? Array.Empty<string>())
+            {
+                if (!string.IsNullOrWhiteSpace(fileName))
+                {
+                    _sharedModAutoAcceptFileNames.Add(fileName);
+                }
+            }
+
+            _sharedModAutoAcceptUntilUtc = autoAcceptUntilUtc;
+        }
+    }
+
+    /// <summary>
+    /// Normalizes server-provided preview text for use in a compact menu description.
+    /// </summary>
+    /// <param name="value">The candidate text.</param>
+    /// <param name="fallback">The fallback text.</param>
+    /// <returns>Single-line display text.</returns>
+    static string SanitizePreviewText(string value, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return fallback;
+        }
+
+        return value.Replace('\r', ' ').Replace('\n', ' ').Trim();
+    }
+
+    readonly struct SharedModOfferCandidate(
+        SharedModEntry entry,
+        PluginShareMetadataStore.PluginShareMetadata metadata,
+        bool hotload)
+    {
+        public SharedModEntry Entry { get; } = entry;
+        public PluginShareMetadataStore.PluginShareMetadata Metadata { get; } = metadata;
+        public bool Hotload { get; } = hotload;
     }
 
     readonly struct SharedModEntry(string fileName, string baseName, string metadataBaseName, string sha256, bool isZip)
@@ -4821,28 +5314,55 @@ internal static class Transference
 
     static void RecordSharedModRequestConsent(DateTime requestedAtUtc, long clientSessionGeneration)
     {
-        sharedModRequestConsentExpiresAtUtc = requestedAtUtc.Add(offerTimeout);
-        sharedModRequestConsentClientSessionGeneration = clientSessionGeneration;
+        lock (pendingOfferLock)
+        {
+            sharedModRequestConsentExpiresAtUtc = requestedAtUtc.Add(offerTimeout);
+            sharedModRequestConsentClientSessionGeneration = clientSessionGeneration;
+        }
     }
 
     static bool ShouldAutoAcceptSharedModOffer(TransferOffer offer, DateTime nowUtc)
         => ShouldAutoAcceptSharedModOffer(offer, nowUtc, API.Shared.VNetwork.ClientSessionGeneration);
 
     static bool ShouldAutoAcceptSharedModOffer(TransferOffer offer, DateTime nowUtc, long clientSessionGeneration)
-        => offer.Clientbound
-        && clientSessionGeneration == sharedModRequestConsentClientSessionGeneration
-        && nowUtc <= sharedModRequestConsentExpiresAtUtc;
+    {
+        lock (pendingOfferLock)
+        {
+            return offer.Clientbound
+                && clientSessionGeneration == sharedModRequestConsentClientSessionGeneration
+                && nowUtc <= sharedModRequestConsentExpiresAtUtc
+                && ShouldAutoAcceptSharedModOffer(
+                    offer.FileNameString,
+                    nowUtc,
+                    _sharedModAutoAcceptUntilUtc,
+                    _sharedModAutoAcceptFileNames);
+        }
+    }
 
     internal static void RecordSharedModRequestConsentForTesting(DateTime requestedAtUtc, long clientSessionGeneration)
         => RecordSharedModRequestConsent(requestedAtUtc, clientSessionGeneration);
 
     internal static void ClearSharedModRequestConsentForTesting()
-        => ClearSharedModRequestConsent();
+        => ClearSharedModRequestConsent(refreshMenuDescription: false);
 
     static void ClearSharedModRequestConsent()
+        => ClearSharedModRequestConsent(refreshMenuDescription: true);
+
+    static void ClearSharedModRequestConsent(bool refreshMenuDescription)
     {
-        sharedModRequestConsentExpiresAtUtc = DateTime.MinValue;
-        sharedModRequestConsentClientSessionGeneration = -1;
+        lock (pendingOfferLock)
+        {
+            sharedModRequestConsentExpiresAtUtc = DateTime.MinValue;
+            sharedModRequestConsentClientSessionGeneration = -1;
+            _sharedModAutoAcceptUntilUtc = DateTime.MinValue;
+            _sharedModAutoAcceptFileNames.Clear();
+            _latestSharedClientModPreview = null;
+        }
+
+        if (refreshMenuDescription && VWorld.IsClient)
+        {
+            OptionsManager.RefreshButtonDescription(REQUEST_SHARED_MODS_BUTTON_ID);
+        }
     }
 
     internal static bool ShouldAutoAcceptSharedModOfferForTesting(TransferOffer offer, DateTime nowUtc, long clientSessionGeneration)

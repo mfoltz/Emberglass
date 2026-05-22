@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v0.3.2
+
+- Added handshake-populated VShare shared-mod catalog details to the client Request Shared Mods menu entry.
+- Made the menu request path one-click by auto-accepting catalog-listed offers during the consent window.
+- Hardened VShare transfer completion ordering so completion packets wait for queued chunk processing before SHA verification.
+- Added Bloodcraft, Eclipse, and RetroCamera proof harness coverage plus focused VShare menu/catalog regression tests.
+
 ## v0.3.1
 
 - Added an internal custom-prefab lifecycle proof with deterministic prefab IDs, manifest-backed cleanup identity, early orphan cleanup/registration systems, and client mirror recipe acknowledgements.

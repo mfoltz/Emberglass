@@ -43,6 +43,13 @@ internal static class OptionsMenuPatches
         Persistence.SaveOptions();
     }
 
+    [HarmonyPatch(typeof(OptionsMenu), nameof(OptionsMenu.Awake))]
+    [HarmonyPostfix]
+    static void AwakePostfix(OptionsMenu __instance)
+    {
+        _optionsMenu = __instance;
+    }
+
     [HarmonyPatch(typeof(OptionsMenu), nameof(OptionsMenu.Update))]
     [HarmonyPostfix]
     static void UpdatePostfix(OptionsMenu __instance)
@@ -59,7 +66,7 @@ internal static class OptionsMenuPatches
 
     internal static SettingsEntry_Button ResolveButtonPrefab(OptionsPanel_Interface panel)
     {
-        _optionsMenu ??= panel.GetComponentInParent<OptionsMenu>();
+        _optionsMenu ??= panel?.GetComponentInParent<OptionsMenu>();
         return ButtonPrefab;
     }
 

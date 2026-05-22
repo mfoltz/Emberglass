@@ -18,6 +18,7 @@ public sealed class SharedModRequestConsentTests
         var offer = new Transference.TransferOffer(Guid.NewGuid(), "Eclipse.dll".AsSpan(), clientbound: true, hotload: true);
 
         Transference.ClearSharedModRequestConsentForTesting();
+        Transference.SetSharedModAutoAcceptCatalogForTesting(new[] { "Eclipse.dll" }, requestedAt.AddSeconds(15));
         Transference.RecordSharedModRequestConsentForTesting(requestedAt, clientSessionGeneration: 7);
 
         Assert.True(Transference.ShouldAutoAcceptSharedModOfferForTesting(offer, requestedAt.AddSeconds(10), clientSessionGeneration: 7));
@@ -34,6 +35,7 @@ public sealed class SharedModRequestConsentTests
         var offer = new Transference.TransferOffer(Guid.NewGuid(), "Eclipse.dll".AsSpan(), clientbound: true, hotload: true);
 
         Transference.ClearSharedModRequestConsentForTesting();
+        Transference.SetSharedModAutoAcceptCatalogForTesting(new[] { "Eclipse.dll" }, requestedAt.AddSeconds(15));
         Transference.RecordSharedModRequestConsentForTesting(requestedAt, clientSessionGeneration: 11);
 
         Assert.True(Transference.ShouldAutoAcceptSharedModOfferForTesting(offer, requestedAt.AddSeconds(10), clientSessionGeneration: 11));
@@ -51,6 +53,7 @@ public sealed class SharedModRequestConsentTests
         var clientboundOffer = new Transference.TransferOffer(Guid.NewGuid(), "Eclipse.dll".AsSpan(), clientbound: true, hotload: true);
 
         Transference.ClearSharedModRequestConsentForTesting();
+        Transference.SetSharedModAutoAcceptCatalogForTesting(new[] { "Eclipse.dll", "Tooling.dll" }, requestedAt.AddSeconds(15));
 
         Assert.False(Transference.ShouldAutoAcceptSharedModOfferForTesting(clientboundOffer, requestedAt, clientSessionGeneration: 7));
 
