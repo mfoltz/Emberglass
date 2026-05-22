@@ -72,4 +72,39 @@ public sealed class VShareMenuDescriptionTests
             "Server shared mods:\n- No server-shared mods advertised by this server.",
             description);
     }
+
+    /// <summary>
+    /// Ensures reconnect/session-reset state cannot keep showing the previous server catalog.
+    /// </summary>
+    [Fact]
+    public void ClearSharedModRequestConsent_ClearsLatestServerPreview()
+    {
+        string source = File.ReadAllText(FindRepositoryFile("Network", "Transference.cs"));
+
+        Assert.Contains("_latestSharedClientModPreview = null;", source);
+        Assert.Contains("OptionsManager.RefreshButtonDescription(REQUEST_SHARED_MODS_BUTTON_ID);", source);
+    }
+
+    static string FindRepositoryFile(params string[] relativeParts)
+    {
+        string current = AppContext.BaseDirectory;
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            string candidate = Path.Combine(new[] { current }.Concat(relativeParts).ToArray());
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            string? parent = Directory.GetParent(current)?.FullName;
+            if (string.Equals(parent, current, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            current = parent ?? string.Empty;
+        }
+
+        throw new FileNotFoundException("Could not find repository file.", Path.Combine(relativeParts));
+    }
 }

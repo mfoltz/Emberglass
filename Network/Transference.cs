@@ -1139,7 +1139,10 @@ internal static class Transference
         _latestSharedClientModPreview = preview.Entries ?? [];
         VWorld.Log.LogInfo(
             $"[VShare] Received server shared-mod catalog with {_latestSharedClientModPreview.Length} entries.");
-        OptionsManager.RefreshButtonDescription(REQUEST_SHARED_MODS_BUTTON_ID);
+        if (VWorld.IsClient)
+        {
+            OptionsManager.RefreshButtonDescription(REQUEST_SHARED_MODS_BUTTON_ID);
+        }
     }
     /// <summary>
     /// Handles a client acceptance by starting the transfer on the server.
@@ -5340,9 +5343,12 @@ internal static class Transference
         => RecordSharedModRequestConsent(requestedAtUtc, clientSessionGeneration);
 
     internal static void ClearSharedModRequestConsentForTesting()
-        => ClearSharedModRequestConsent();
+        => ClearSharedModRequestConsent(refreshMenuDescription: false);
 
     static void ClearSharedModRequestConsent()
+        => ClearSharedModRequestConsent(refreshMenuDescription: true);
+
+    static void ClearSharedModRequestConsent(bool refreshMenuDescription)
     {
         lock (pendingOfferLock)
         {
@@ -5350,6 +5356,12 @@ internal static class Transference
             sharedModRequestConsentClientSessionGeneration = -1;
             _sharedModAutoAcceptUntilUtc = DateTime.MinValue;
             _sharedModAutoAcceptFileNames.Clear();
+            _latestSharedClientModPreview = null;
+        }
+
+        if (refreshMenuDescription && VWorld.IsClient)
+        {
+            OptionsManager.RefreshButtonDescription(REQUEST_SHARED_MODS_BUTTON_ID);
         }
     }
 
