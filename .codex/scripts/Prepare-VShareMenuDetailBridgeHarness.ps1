@@ -144,21 +144,56 @@ function Copy-ProvenanceAsset {
 $serverRoot = (Resolve-Path -LiteralPath $ServerInstallPath -ErrorAction Stop).Path
 $serverConfigDirectory = Join-Path $serverRoot "BepInEx\config"
 $serverShareDirectory = Join-Path $serverConfigDirectory "Server"
+$serverConfigCompanionRoot = Join-Path $serverConfigDirectory "ServerConfigs"
+$eclipseConfigCompanionDirectory = Join-Path $serverConfigCompanionRoot "Eclipse"
+$eclipseConfigCompanionPath = Join-Path $eclipseConfigCompanionDirectory "Eclipse.VShareProof.cfg"
+$eclipseUiConfigCompanionPath = Join-Path $eclipseConfigCompanionDirectory "io.zfolmt.Eclipse.cfg"
 $emberglassConfigDirectory = Join-Path $serverConfigDirectory "Emberglass"
 $shareMetadataPath = Join-Path $emberglassConfigDirectory "ShareMetadata.json"
 $bloodcraftConfigPath = Join-Path $serverConfigDirectory "io.zfolmt.Bloodcraft.cfg"
 
 $eclipseFile = Resolve-ExistingFile -Path $EclipseAsset
 $retroCameraFile = Resolve-ExistingFile -Path $RetroCameraAsset
+$runId = Get-Date -Format "yyyyMMdd-HHmmss"
+$proofSentinel = "emberglass-vshare-companion-config-runtime-proof-$runId"
 
 if ($PSCmdlet.ShouldProcess($serverRoot, "stage VShare menu-detail bridge harness assets")) {
     New-Item -ItemType Directory -Path $serverShareDirectory -Force | Out-Null
+    New-Item -ItemType Directory -Path $eclipseConfigCompanionDirectory -Force | Out-Null
     New-Item -ItemType Directory -Path $emberglassConfigDirectory -Force | Out-Null
 
     $stagedAssets = @(
         Copy-ProvenanceAsset -Source $eclipseFile -DestinationDirectory $serverShareDirectory
         Copy-ProvenanceAsset -Source $retroCameraFile -DestinationDirectory $serverShareDirectory
     )
+    Set-Content -LiteralPath $eclipseConfigCompanionPath -Encoding utf8 -Value @(
+        "## Emberglass VShare companion config proof"
+        "## This file is staged by the harness to prove managed config delivery."
+        "[VShareProof]"
+        "Enabled = true"
+        "ProofRunId = $runId"
+        "ProofSentinel = $proofSentinel"
+        "ExpectedSharedMod = Eclipse"
+    )
+    $stagedConfigHash = Get-FileHash -LiteralPath $eclipseConfigCompanionPath -Algorithm SHA256
+    Set-Content -LiteralPath $eclipseUiConfigCompanionPath -Encoding utf8 -Value @(
+        "## Emberglass VShare Eclipse UI proof config"
+        "## ProofSentinel = $proofSentinel"
+        "## All Eclipse UIOptions booleans are true for the runtime proof."
+        "[UIOptions]"
+        "ExperienceBar = true"
+        "ShowPrestige = true"
+        "LegacyBar = true"
+        "ExpertiseBar = true"
+        "Familiars = true"
+        "Professions = true"
+        "QuestTrackers = true"
+        "ShiftSlot = true"
+        "AttributeBuffs = true"
+        "Eclipsed = true"
+        "UseEmberglassBridge = true"
+    )
+    $stagedEclipseConfigHash = Get-FileHash -LiteralPath $eclipseUiConfigCompanionPath -Algorithm SHA256
 
     $metadata = [ordered]@{
         Plugins = [ordered]@{
@@ -169,6 +204,16 @@ if ($PSCmdlet.ShouldProcess($serverRoot, "stage VShare menu-detail bridge harnes
                 ClientSafe = $true
                 HotloadAllowed = $true
                 LocalSha256 = ""
+                Configs = @(
+                    [ordered]@{
+                        Source = "Eclipse.VShareProof.cfg"
+                        Target = "Eclipse.VShareProof.cfg"
+                    }
+                    [ordered]@{
+                        Source = "io.zfolmt.Eclipse.cfg"
+                        Target = "io.zfolmt.Eclipse.cfg"
+                    }
+                )
                 Tags = @("client")
                 Categories = @()
             }
@@ -189,10 +234,16 @@ if ($PSCmdlet.ShouldProcess($serverRoot, "stage VShare menu-detail bridge harnes
     if (-not $SkipBloodcraftConfig) {
         New-Item -ItemType Directory -Path $serverConfigDirectory -Force | Out-Null
         Set-IniValue -Path $bloodcraftConfigPath -Section "General" -Key "Eclipsed" -Value "true"
+        Set-IniValue -Path $bloodcraftConfigPath -Section "General" -Key "UseEmberglassEclipseBridge" -Value "true"
         Set-IniValue -Path $bloodcraftConfigPath -Section "Leveling" -Key "LevelingSystem" -Value "true"
+        Set-IniValue -Path $bloodcraftConfigPath -Section "Leveling" -Key "RestedXPSystem" -Value "true"
+        Set-IniValue -Path $bloodcraftConfigPath -Section "Leveling" -Key "ExpShare" -Value "true"
+        Set-IniValue -Path $bloodcraftConfigPath -Section "Legacies" -Key "LegacySystem" -Value "true"
+        Set-IniValue -Path $bloodcraftConfigPath -Section "Expertise" -Key "ExpertiseSystem" -Value "true"
+        Set-IniValue -Path $bloodcraftConfigPath -Section "Familiars" -Key "FamiliarSystem" -Value "true"
+        Set-IniValue -Path $bloodcraftConfigPath -Section "Familiars" -Key "ShareUnlocks" -Value "true"
     }
 
-    $runId = Get-Date -Format "yyyyMMdd-HHmmss"
     $receiptDirectory = Join-Path $ReceiptRoot $runId
     New-Item -ItemType Directory -Path $receiptDirectory -Force | Out-Null
 
@@ -205,6 +256,49 @@ if ($PSCmdlet.ShouldProcess($serverRoot, "stage VShare menu-detail bridge harnes
         bloodcraftConfigPath = $bloodcraftConfigPath
         bloodcraftConfigUpdated = -not $SkipBloodcraftConfig.IsPresent
         stagedAssets = $stagedAssets
+        stagedCompanionConfigs = @(
+            [ordered]@{
+                pluginKey = "Eclipse"
+                source = "Eclipse.VShareProof.cfg"
+                target = "Eclipse.VShareProof.cfg"
+                stagedPath = (Resolve-Path -LiteralPath $eclipseConfigCompanionPath).Path
+                sha256 = $stagedConfigHash.Hash
+                length = (Get-Item -LiteralPath $eclipseConfigCompanionPath).Length
+            }
+            [ordered]@{
+                pluginKey = "Eclipse"
+                source = "io.zfolmt.Eclipse.cfg"
+                target = "io.zfolmt.Eclipse.cfg"
+                stagedPath = (Resolve-Path -LiteralPath $eclipseUiConfigCompanionPath).Path
+                sha256 = $stagedEclipseConfigHash.Hash
+                length = (Get-Item -LiteralPath $eclipseUiConfigCompanionPath).Length
+            }
+        )
+        expectedClientEvidence = [ordered]@{
+            managedConfigManifest = "BepInEx\config\Emberglass\VShareManagedConfigs.json"
+            companionConfigTarget = "BepInEx\config\Eclipse.VShareProof.cfg"
+            eclipseConfigTarget = "BepInEx\config\io.zfolmt.Eclipse.cfg"
+            companionConfigValues = [ordered]@{
+                section = "VShareProof"
+                enabled = "true"
+                proofRunId = $runId
+                proofSentinel = $proofSentinel
+                expectedSharedMod = "Eclipse"
+            }
+            eclipseUiOptions = [ordered]@{
+                ExperienceBar = "true"
+                ShowPrestige = "true"
+                LegacyBar = "true"
+                ExpertiseBar = "true"
+                Familiars = "true"
+                Professions = "true"
+                QuestTrackers = "true"
+                ShiftSlot = "true"
+                AttributeBuffs = "true"
+                Eclipsed = "true"
+                UseEmberglassBridge = "true"
+            }
+        }
     }
 
     $receiptPath = Join-Path $receiptDirectory "receipt.json"

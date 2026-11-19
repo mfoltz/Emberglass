@@ -10,6 +10,33 @@ namespace Emberglass.Tests.Network;
 [Collection("Assembly setup")]
 public sealed class TransferWorkQueueIntegrationTests
 {
+    [Fact]
+    public void DecompressChunkRoutine_FailedWorkReportsErrorInsteadOfCompletion()
+    {
+        Transference.ResetTransferWorkQueueForTesting();
+        try
+        {
+            Exception? failure = null;
+            bool completed = false;
+            var routine = Transference.DecompressChunkRoutine(
+                new byte[] { 1 },
+                _ => throw new InvalidOperationException("No slices should be written."),
+                () => completed = true,
+                onError: ex => failure = ex);
+
+            Assert.True(routine.MoveNext());
+            Transference.ProcessTransferWorkQueueForTesting(TimeSpan.FromSeconds(1));
+            Assert.False(routine.MoveNext());
+            Assert.IsType<InvalidDataException>(failure);
+            Assert.False(completed);
+            Assert.Equal(0, Transference.GetTransferWorkQueueCountForTesting());
+        }
+        finally
+        {
+            Transference.ResetTransferWorkQueueForTesting();
+        }
+    }
+
     /// <summary>
     /// Verifies transfer setup hashing enqueues a work item.
     /// </summary>

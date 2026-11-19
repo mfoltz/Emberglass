@@ -55,6 +55,7 @@ Emberglass stages server-local mods from the following folders on disk:
 
 * `BepInEx/config/LocalMods` for server-local mods you want to hotload/download.
 * `BepInEx/config/Server` for clientbound packages the server shares with connecting clients.
+* `BepInEx/config/ServerConfigs/<PluginKey>` for optional config files that travel with a matching shared mod.
 
 See the [VShare guide](docs/vshare.md) for the full request/consent flow and staging details.
 
@@ -64,6 +65,8 @@ See the [VShare guide](docs/vshare.md) for the full request/consent flow and sta
 * The mod identity is derived from the file name **without** its extension (for example, `MyMod.dll` or `MyMod.zip` → `MyMod`).
 * Clientbound share requests only offer the mods staged by the server operator, so only stage mods that are safe to
   load on clients.
+* Companion config files are declared in `ShareMetadata.json` and are sent only after the matching shared mod installs
+  successfully.
 * GitHub release identity should be declared in `BepInEx/config/Emberglass/ShareMetadata.json` with `GitHubRepo`,
   `GitHubTag`, and optional `GitHubAssetName`.
 * GitHub release identity can still be auto-resolved from staged asset names in `BepInEx/config/Server` using the
@@ -103,6 +106,9 @@ If the staged asset does not follow the pattern, Emberglass cannot auto-resolve 
   the GitHub Release and restage it before trying again.
 * **GitHub Release unavailable** (lookup failure or missing digest metadata): Emberglass aborts the transfer and asks you
   to retry later. Wait for GitHub Releases to respond, then retry the download.
+* **Existing local config**: companion configs write into `BepInEx/config`, but VShare only overwrites files recorded in
+  `BepInEx/config/Emberglass/VShareManagedConfigs.json` whose current hash still matches the last VShare-applied copy.
+  User-edited or unmanaged local configs are skipped.
 
 [thunderstore]: https://thunderstore.io/c/v-rising/p/zfolmt/Emberglass/
 

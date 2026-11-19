@@ -41,6 +41,8 @@ internal sealed class OutgoingTransferScheduler<TWork>
     /// </summary>
     public int QueuedCount => queuedTransfers.Count;
 
+    public TWork[] SnapshotQueued() => queuedTransfers.ToArray();
+
     /// <summary>
     /// Updates the active transfer limit.
     /// </summary>

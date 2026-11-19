@@ -8,6 +8,10 @@ namespace Emberglass.Tests.Network;
 /// </summary>
 public sealed class VShareMenuDescriptionTests
 {
+    const string Preamble =
+        "Download mods shared by this server. Some may include config files, but VShare preserves your own settings.\n\n" +
+        "Server shared mods:";
+
     /// <summary>
     /// Ensures the default hover text waits for server-advertised catalog details.
     /// </summary>
@@ -17,7 +21,7 @@ public sealed class VShareMenuDescriptionTests
         string description = Transference.BuildSharedModsMenuDescriptionForTesting(null);
 
         Assert.Equal(
-            "Server shared mods:\n- Waiting for server details.",
+            Preamble + "\n- Waiting for server details.",
             description);
     }
 
@@ -47,8 +51,7 @@ public sealed class VShareMenuDescriptionTests
 
         string description = Transference.BuildSharedModsMenuDescriptionForTesting(entries);
 
-        Assert.Contains("Server shared mods:", description);
-        Assert.Contains("- Eclipse v1.3.14-pre", description);
+        Assert.StartsWith(Preamble + Environment.NewLine + "- Eclipse v1.3.14-pre", description);
         Assert.Contains("Source: mfoltz/Eclipse", description);
         Assert.Contains("File: Eclipse.dll (DLL)", description);
         Assert.Contains("Runtime load: enabled", description);
@@ -69,7 +72,7 @@ public sealed class VShareMenuDescriptionTests
         string description = Transference.BuildSharedModsMenuDescriptionForTesting(Array.Empty<Transference.SharedClientModPreviewEntry>());
 
         Assert.Equal(
-            "Server shared mods:\n- No server-shared mods advertised by this server.",
+            Preamble + "\n- No server-shared mods advertised by this server.",
             description);
     }
 

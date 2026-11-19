@@ -28,6 +28,12 @@ internal enum HotloadPluginStatus
     Failed
 }
 
+internal enum VShareTransferAssetKind : byte
+{
+    Mod = 0,
+    Config = 1
+}
+
 internal readonly record struct HotloadPluginResult(
     bool Success,
     HotloadPluginStatus Status,
@@ -43,37 +49,135 @@ internal static class Transference
     {
         public readonly bool Clientbound;
         public readonly bool Hotload;
+        public readonly VShareTransferAssetKind AssetKind;
+        public readonly Guid ParentTransferId;
+        public readonly int CompanionIndex;
 
         public fixed byte FileName[Const.STANDARD_LENGTH];
+        public fixed byte ConfigPluginKey[Const.STANDARD_LENGTH];
+        public fixed byte ConfigSource[Const.STANDARD_LENGTH];
+        public fixed byte ConfigTarget[Const.STANDARD_LENGTH];
         public TransferRequest(ReadOnlySpan<char> fileName, bool clientbound, bool hotload)
+            : this(fileName, clientbound, hotload, VShareTransferAssetKind.Mod, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty)
         {
-            fixed (byte* dest = FileName)
-            {
-                int bytesWritten = System.Text.Encoding.UTF8.GetBytes(fileName, new Span<byte>(dest, Const.STANDARD_LENGTH));
-                for (int i = bytesWritten; i < Const.STANDARD_LENGTH; i++)
-                {
-                    dest[i] = 0;
-                }
-            }
+        }
 
+        public TransferRequest(
+            ReadOnlySpan<char> fileName,
+            bool clientbound,
+            bool hotload,
+            VShareTransferAssetKind assetKind,
+            ReadOnlySpan<char> configPluginKey,
+            ReadOnlySpan<char> configSource,
+            ReadOnlySpan<char> configTarget,
+            Guid parentTransferId = default,
+            int companionIndex = 0)
+        {
             Clientbound = clientbound;
             Hotload = hotload;
+            AssetKind = assetKind;
+            ParentTransferId = parentTransferId;
+            CompanionIndex = companionIndex;
+            fixed (byte* dest = FileName)
+            {
+                WriteFixedString(dest, fileName);
+            }
+
+            fixed (byte* dest = ConfigPluginKey)
+            {
+                WriteFixedString(dest, configPluginKey);
+            }
+
+            fixed (byte* dest = ConfigSource)
+            {
+                WriteFixedString(dest, configSource);
+            }
+
+            fixed (byte* dest = ConfigTarget)
+            {
+                WriteFixedString(dest, configTarget);
+            }
         }
+
         public string FileNameString
         {
             get
             {
                 fixed (byte* p = FileName)
                 {
-                    int len = 0;
-                    while (len < Const.STANDARD_LENGTH && p[len] != 0)
-                    {
-                        len++;
-                    }
-
-                    return System.Text.Encoding.UTF8.GetString(p, len);
+                    return ReadFixedString(p);
                 }
             }
+        }
+
+        public string ConfigPluginKeyString
+        {
+            get
+            {
+                fixed (byte* p = ConfigPluginKey)
+                {
+                    return ReadFixedString(p);
+                }
+            }
+        }
+
+        public string ConfigSourceString
+        {
+            get
+            {
+                fixed (byte* p = ConfigSource)
+                {
+                    return ReadFixedString(p);
+                }
+            }
+        }
+
+        public string ConfigTargetString
+        {
+            get
+            {
+                fixed (byte* p = ConfigTarget)
+                {
+                    return ReadFixedString(p);
+                }
+            }
+        }
+
+        public static TransferRequest CreateConfig(
+            string pluginKey,
+            string source,
+            string target,
+            Guid parentTransferId,
+            int companionIndex)
+            => new(
+                target.AsSpan(),
+                clientbound: true,
+                hotload: false,
+                VShareTransferAssetKind.Config,
+                pluginKey.AsSpan(),
+                source.AsSpan(),
+                target.AsSpan(),
+                parentTransferId,
+                companionIndex);
+
+        static void WriteFixedString(byte* destination, ReadOnlySpan<char> value)
+        {
+            int bytesWritten = System.Text.Encoding.UTF8.GetBytes(value, new Span<byte>(destination, Const.STANDARD_LENGTH));
+            for (int i = bytesWritten; i < Const.STANDARD_LENGTH; i++)
+            {
+                destination[i] = 0;
+            }
+        }
+
+        static string ReadFixedString(byte* source)
+        {
+            int len = 0;
+            while (len < Const.STANDARD_LENGTH && source[len] != 0)
+            {
+                len++;
+            }
+
+            return System.Text.Encoding.UTF8.GetString(source, len);
         }
     }
 
@@ -146,6 +250,7 @@ internal static class Transference
         public string FileName { get; set; } = string.Empty;
         public bool IsZip { get; set; }
         public bool Hotload { get; set; }
+        public int ConfigCount { get; set; }
 
         public SharedClientModPreviewEntry()
         {
@@ -165,7 +270,7 @@ internal static class Transference
             string gitHubTag,
             bool isZip,
             bool hotload)
-            : this(displayName, gitHubRepo, gitHubTag, string.Empty, isZip, hotload)
+            : this(displayName, gitHubRepo, gitHubTag, string.Empty, isZip, hotload, 0)
         {
         }
 
@@ -185,6 +290,18 @@ internal static class Transference
             string fileName,
             bool isZip,
             bool hotload)
+            : this(displayName, gitHubRepo, gitHubTag, fileName, isZip, hotload, 0)
+        {
+        }
+
+        public SharedClientModPreviewEntry(
+            string displayName,
+            string gitHubRepo,
+            string gitHubTag,
+            string fileName,
+            bool isZip,
+            bool hotload,
+            int configCount)
         {
             DisplayName = displayName ?? string.Empty;
             GitHubRepo = gitHubRepo ?? string.Empty;
@@ -192,6 +309,7 @@ internal static class Transference
             FileName = fileName ?? string.Empty;
             IsZip = isZip;
             Hotload = hotload;
+            ConfigCount = Math.Max(0, configCount);
         }
     }
 
@@ -257,19 +375,58 @@ internal static class Transference
     {
         public readonly Guid Id;
         public readonly int TotalBytes;
+        public readonly VShareTransferAssetKind AssetKind;
+        public readonly Guid ParentTransferId;
+        public readonly int CompanionIndex;
+        public readonly int CompanionCount;
 
         public fixed byte FileName[Const.STANDARD_LENGTH];
         public fixed byte Sha256[Const.STANDARD_LENGTH];
         public fixed byte ReleaseAssetSha256[Const.STANDARD_LENGTH];
+        public fixed byte ConfigPluginKey[Const.STANDARD_LENGTH];
+        public fixed byte ConfigSource[Const.STANDARD_LENGTH];
+        public fixed byte ConfigTarget[Const.STANDARD_LENGTH];
         public TransferSession(
             Guid id,
             int totalBytes,
             ReadOnlySpan<char> fileName,
             ReadOnlySpan<byte> sha256,
-            ReadOnlySpan<byte> releaseAssetSha256)
+            ReadOnlySpan<byte> releaseAssetSha256,
+            int companionCount = 0)
+            : this(
+                id,
+                totalBytes,
+                fileName,
+                sha256,
+                releaseAssetSha256,
+                VShareTransferAssetKind.Mod,
+                ReadOnlySpan<char>.Empty,
+                ReadOnlySpan<char>.Empty,
+                ReadOnlySpan<char>.Empty,
+                companionCount: companionCount)
+        {
+        }
+
+        public TransferSession(
+            Guid id,
+            int totalBytes,
+            ReadOnlySpan<char> fileName,
+            ReadOnlySpan<byte> sha256,
+            ReadOnlySpan<byte> releaseAssetSha256,
+            VShareTransferAssetKind assetKind,
+            ReadOnlySpan<char> configPluginKey,
+            ReadOnlySpan<char> configSource,
+            ReadOnlySpan<char> configTarget,
+            Guid parentTransferId = default,
+            int companionIndex = 0,
+            int companionCount = 0)
         {
             Id = id;
             TotalBytes = totalBytes;
+            AssetKind = assetKind;
+            ParentTransferId = parentTransferId;
+            CompanionIndex = companionIndex;
+            CompanionCount = companionCount;
 
             fixed (byte* dest = FileName)
             {
@@ -303,6 +460,33 @@ internal static class Transference
                 }
 
                 for (int i = bytesToCopy; i < Const.STANDARD_LENGTH; i++)
+                {
+                    dest[i] = 0;
+                }
+            }
+
+            fixed (byte* dest = ConfigPluginKey)
+            {
+                int bytesWritten = System.Text.Encoding.UTF8.GetBytes(configPluginKey, new Span<byte>(dest, Const.STANDARD_LENGTH));
+                for (int i = bytesWritten; i < Const.STANDARD_LENGTH; i++)
+                {
+                    dest[i] = 0;
+                }
+            }
+
+            fixed (byte* dest = ConfigSource)
+            {
+                int bytesWritten = System.Text.Encoding.UTF8.GetBytes(configSource, new Span<byte>(dest, Const.STANDARD_LENGTH));
+                for (int i = bytesWritten; i < Const.STANDARD_LENGTH; i++)
+                {
+                    dest[i] = 0;
+                }
+            }
+
+            fixed (byte* dest = ConfigTarget)
+            {
+                int bytesWritten = System.Text.Encoding.UTF8.GetBytes(configTarget, new Span<byte>(dest, Const.STANDARD_LENGTH));
+                for (int i = bytesWritten; i < Const.STANDARD_LENGTH; i++)
                 {
                     dest[i] = 0;
                 }
@@ -346,12 +530,68 @@ internal static class Transference
             }
         }
         public byte[] ReleaseAssetSha256Bytes => ReleaseAssetSha256Span.ToArray();
+
+        public string ConfigPluginKeyString
+        {
+            get
+            {
+                fixed (byte* p = ConfigPluginKey)
+                {
+                    return ReadFixedString(p);
+                }
+            }
+        }
+
+        public string ConfigSourceString
+        {
+            get
+            {
+                fixed (byte* p = ConfigSource)
+                {
+                    return ReadFixedString(p);
+                }
+            }
+        }
+
+        public string ConfigTargetString
+        {
+            get
+            {
+                fixed (byte* p = ConfigTarget)
+                {
+                    return ReadFixedString(p);
+                }
+            }
+        }
+
+        static string ReadFixedString(byte* source)
+        {
+            int len = 0;
+            while (len < Const.STANDARD_LENGTH && source[len] != 0)
+            {
+                len++;
+            }
+
+            return System.Text.Encoding.UTF8.GetString(source, len);
+        }
     }
     public readonly struct TransferComplete(Guid id, bool hotload)
     {
         public readonly Guid Id = id;
         public readonly bool Hotload = hotload;
     }
+    // A result for the verified disk install; hotload is a separate client step.
+    public readonly struct SharedModInstallResult(Guid id, bool success)
+    {
+        public readonly Guid Id = id;
+        public readonly bool Success = success;
+    }
+
+    readonly struct SharedModCompanionsQueued(Guid parentId)
+    {
+        public readonly Guid ParentId = parentId;
+    }
+
     readonly record struct QueuedOutgoingTransfer(Guid TransferId, User Target, TransferRequest Request) : IOutgoingTransferWork
     {
         public ulong TargetId => Target.PlatformId;
@@ -401,12 +641,15 @@ internal static class Transference
     static readonly object incomingLock = new();
     static readonly Dictionary<Guid, PendingClientOffer> pendingClientOffers = [];
     static readonly Dictionary<Guid, PendingServerOffer> pendingServerOffers = [];
+    static readonly Dictionary<Guid, PendingCompanionConfigBatch> pendingCompanionConfigBatches = [];
+    static readonly Dictionary<Guid, VShareCompanionInstall> companionInstalls = [];
     static readonly object pendingOfferLock = new();
     static readonly Dictionary<OverwriteConfirmationKey, DateTime> overwriteConfirmations = [];
     static readonly object overwriteConfirmationLock = new();
     static DateTime sharedModRequestConsentExpiresAtUtc = DateTime.MinValue;
     static long sharedModRequestConsentClientSessionGeneration = -1;
     static bool offerCleanupStarted;
+    static DateTime nextCompanionQueueNoticeUtc;
     static bool incomingCleanupStarted;
     static bool transferWorkQueueStarted;
     static bool _initialized;
@@ -439,7 +682,9 @@ internal static class Transference
     const int MAX_SHARED_MOD_PREVIEW_ENTRIES = 8;
     const int SHARED_MOD_AUTO_ACCEPT_WINDOW_SECONDS = 15;
     const string REQUEST_SHARED_MODS_BUTTON_ID = "emberglass.request_shared_mods";
-    const string SHARED_MODS_MENU_HEADER = "Server shared mods:";
+    const string SHARED_MODS_MENU_PREAMBLE =
+        "Download mods shared by this server. Some may include config files, but VShare preserves your own settings.\n\n" +
+        "Server shared mods:";
     delegate bool TryGetShareMetadataDelegate(
         string metadataKey,
         out PluginShareMetadataStore.PluginShareMetadata metadata,
@@ -473,6 +718,7 @@ internal static class Transference
     const int MAX_COLLISION_LOG_COUNT = 5;
     static readonly TimeSpan offerTimeout = TimeSpan.FromSeconds(OFFER_TIMEOUT_SECONDS);
     static readonly TimeSpan incomingTransferTimeout = TimeSpan.FromSeconds(INCOMING_TRANSFER_TIMEOUT_SECONDS);
+    static readonly TimeSpan companionQueueNoticeInterval = TimeSpan.FromSeconds(INCOMING_TRANSFER_TIMEOUT_SECONDS / 4);
     static DateTime lastTransferWorkQueueLogUtc = DateTime.MinValue;
     /// <summary>
     /// Gets or sets the provider used to resolve the current UTC time.
@@ -536,6 +782,8 @@ internal static class Transference
         Register<TransferChunk>(Direction.Clientbound, (u, o) => OnTransferChunk((TransferChunk)o));
         Register<RequestSharedClientMods>(Direction.Serverbound, (u, o) => HandleSharedModsRequest(u, (RequestSharedClientMods)o));
         Register<SharedClientModPreview>(Direction.Clientbound, (u, o) => OnSharedClientModPreview((SharedClientModPreview)o));
+        Register<SharedModInstallResult>(Direction.Serverbound, (u, o) => OnSharedModInstallResult(u, (SharedModInstallResult)o));
+        Register<SharedModCompanionsQueued>(Direction.Clientbound, (u, o) => OnSharedModCompanionsQueued(u, (SharedModCompanionsQueued)o));
 
         if (VWorld.IsServer)
         {
@@ -637,6 +885,11 @@ internal static class Transference
 
         VWorld.Log.LogInfo($"[VShare] Offer accepted: {offer.FileNameString} (offer {offer.Id}).");
         API.Shared.VNetwork.SendToServer(new TransferAccept(offerId));
+        if (offer.Clientbound)
+        {
+            VShareClientNotices.Current.Accept(offer.Id, offer.FileNameString, API.Shared.VNetwork.ClientSessionGeneration);
+        }
+
         return true;
     }
 
@@ -679,7 +932,7 @@ internal static class Transference
             return;
         }
 
-        TransferRoutine(user, request.FileNameString, request.Clientbound, request.Hotload, id).Run();
+        TransferRoutine(user, request, id).Run();
     }
 
     static void QueueOutgoingTransfer(QueuedOutgoingTransfer transfer)
@@ -716,9 +969,7 @@ internal static class Transference
         {
             IEnumerator routine = TransferRoutine(
                 transfer.Target,
-                transfer.Request.FileNameString,
-                transfer.Request.Clientbound,
-                transfer.Request.Hotload,
+                transfer.Request,
                 transfer.TransferId);
 
             while (routine.MoveNext())
@@ -728,6 +979,18 @@ internal static class Transference
         }
         finally
         {
+            if (transfer.Request.AssetKind == VShareTransferAssetKind.Mod)
+            {
+                lock (pendingOfferLock)
+                {
+                    if (pendingCompanionConfigBatches.TryGetValue(transfer.TransferId, out var batch)
+                        && !batch.ResultExpiresAt.HasValue)
+                    {
+                        pendingCompanionConfigBatches.Remove(transfer.TransferId);
+                    }
+                }
+            }
+
             CompleteOutgoingTransfer(transfer.TransferId);
         }
     }
@@ -857,14 +1120,109 @@ internal static class Transference
             }
 
             bool hotload = IsSharedModHotloadAllowed(entry.IsZip, metadata);
-            eligibleOffers.Add(new SharedModOfferCandidate(entry, metadata, hotload));
+            IReadOnlyList<VShareResolvedConfigCompanion> companionConfigs =
+                ResolveCompanionConfigEntries(entry, metadata);
+            eligibleOffers.Add(new SharedModOfferCandidate(entry, metadata, hotload, companionConfigs));
         }
 
         foreach (SharedModOfferCandidate offer in eligibleOffers)
         {
-            SendTransferOffer(user, new TransferRequest(offer.Entry.FileName.AsSpan(), clientbound: true, offer.Hotload));
+            Guid offerId = SendTransferOffer(user, new TransferRequest(offer.Entry.FileName.AsSpan(), clientbound: true, offer.Hotload));
+            if (offerId != Guid.Empty && offer.CompanionConfigs.Count > 0)
+            {
+                StorePendingCompanionConfigBatch(user, offerId, offer.Entry, offer.CompanionConfigs);
+            }
         }
     }
+    static IEnumerator TransferRoutine(User target, TransferRequest request, Guid? transferId = null)
+    {
+        if (request.AssetKind == VShareTransferAssetKind.Config)
+        {
+            return TransferConfigRoutine(target, request, transferId);
+        }
+
+        return TransferRoutine(target, request.FileNameString, request.Clientbound, request.Hotload, transferId);
+    }
+
+    static IEnumerator TransferConfigRoutine(User target, TransferRequest request, Guid? transferId = null)
+    {
+        if (!request.Clientbound)
+        {
+            yield break;
+        }
+
+        if (!VShareConfigCompanion.TryGetServerConfigBytes(
+                request.ConfigPluginKeyString,
+                request.ConfigSourceString,
+                out byte[] rawBytes,
+                out _,
+                out string readError))
+        {
+            VWorld.Log.LogWarning($"[VShare] Companion config transfer skipped: {readError}");
+            yield break;
+        }
+
+        byte[] fileBytes = null;
+        bool compressionDone = false;
+        yield return CompressChunkRoutine(rawBytes, compressed =>
+        {
+            fileBytes = compressed;
+            compressionDone = true;
+        });
+
+        while (!compressionDone)
+        {
+            yield return null;
+        }
+
+        Guid id = transferId ?? Guid.NewGuid();
+        byte[] hash = null;
+        bool hashComplete = false;
+        QueueTransferHashWork(
+            id,
+            fileBytes,
+            result =>
+            {
+                hash = result;
+                hashComplete = true;
+            });
+
+        while (!hashComplete)
+        {
+            yield return null;
+        }
+
+        VWorld.Log.LogInfo(FormatTransferDispatchMessage(request.ConfigTargetString, fileBytes.Length, id));
+
+        TransferSession init = new(
+            id,
+            fileBytes.Length,
+            request.ConfigTargetString.AsSpan(),
+            hash.AsSpan(),
+            ReadOnlySpan<byte>.Empty,
+            VShareTransferAssetKind.Config,
+            request.ConfigPluginKeyString.AsSpan(),
+            request.ConfigSourceString.AsSpan(),
+            request.ConfigTargetString.AsSpan(),
+            request.ParentTransferId,
+            request.CompanionIndex);
+        API.Shared.VNetwork.SendToClient(target, init);
+
+        bool sendComplete = false;
+        EnqueueTransferWorkItem(new TransferChunkSendWorkItem(
+            id,
+            target,
+            fileBytes,
+            Const.PACKET_BYTES,
+            hotload: false,
+            () => sendComplete = true));
+
+        while (!sendComplete)
+        {
+            yield return null;
+        }
+    }
+
     static IEnumerator TransferRoutine(User target, string fileName, bool clientbound, bool hotload = false, Guid? transferId = null)
     {
         bool isZip = fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
@@ -1047,12 +1405,19 @@ internal static class Transference
 
         VWorld.Log.LogInfo(FormatTransferDispatchMessage(fileName, fileBytes.Length, id));
 
+        int companionCount;
+        lock (pendingOfferLock)
+        {
+            companionCount = pendingCompanionConfigBatches.TryGetValue(id, out var batch) ? batch.Configs.Count : 0;
+        }
+
         TransferSession init = new(
             id,
             fileBytes.Length,
             fileName.AsSpan(),
             Hash.AsSpan(),
-            releaseDigestBytes.AsSpan());
+            releaseDigestBytes.AsSpan(),
+            companionCount);
         API.Shared.VNetwork.SendToClient(target, init);
 
         bool SendComplete = false;
@@ -1062,7 +1427,18 @@ internal static class Transference
             fileBytes,
             chunkSize,
             hotload,
-            () => SendComplete = true));
+            () =>
+            {
+                lock (pendingOfferLock)
+                {
+                    if (pendingCompanionConfigBatches.TryGetValue(id, out var batch))
+                    {
+                        batch.ResultExpiresAt = GetUtcNow().Add(incomingTransferTimeout);
+                    }
+                }
+
+                SendComplete = true;
+            }));
 
         while (!SendComplete)
         {
@@ -1071,8 +1447,25 @@ internal static class Transference
     }
     static void OnTransferSession(User sender, TransferSession session)
     {
+        if (session.AssetKind == VShareTransferAssetKind.Config
+            && (!VWorld.IsClient
+                || !API.Shared.VNetwork.IsReady
+                || !companionInstalls.TryGetValue(session.ParentTransferId, out var install)
+                || session.Id == session.ParentTransferId
+                || !install.TryBegin(
+                    session.CompanionIndex, session.Id, sender.PlatformId,
+                    API.Shared.VNetwork.ClientSessionGeneration, GetUtcNow())))
+        {
+            VWorld.Log.LogWarning($"[VShare] Ignoring config transfer {session.Id} without a matching verified mod install.");
+            return;
+        }
+
         VWorld.Log.LogInfo(FormatTransferStartMessage(session.FileNameString, session.TotalBytes));
-        RegisterIncomingTransfer(session, sender.PlatformId);
+        IncomingTransfer incoming = RegisterIncomingTransfer(session, sender.PlatformId);
+        if (incoming.AssetKind == VShareTransferAssetKind.Mod)
+        {
+            VShareClientNotices.Current.Start(incoming.Id, incoming.FileName, incoming.ClientSessionGeneration);
+        }
     }
     /// <summary>
     /// Registers an incoming transfer in the tracking store.
@@ -1176,6 +1569,7 @@ internal static class Transference
             if (pendingOffer.ExpiresAt <= GetUtcNow())
             {
                 pendingServerOffers.Remove(accept.Id);
+                pendingCompanionConfigBatches.Remove(accept.Id);
                 VWorld.Log.LogWarning(
                     $"Transfer accept expired ~ ID: {accept.Id} | Plugin: {pendingOffer.Offer.FileNameString}.");
                 return;
@@ -1188,6 +1582,88 @@ internal static class Transference
             $"[VShare] Offer accepted: {pendingOffer.Offer.FileNameString} by {user.PlatformId} (offer {accept.Id}).");
         InternalTransferRequest(user, pendingOffer.Request, pendingOffer.Offer.Id);
     }
+
+    static void OnSharedModInstallResult(User user, SharedModInstallResult result)
+    {
+        if (!VWorld.IsServer)
+        {
+            return;
+        }
+
+        PendingCompanionConfigBatch batch = null;
+        lock (pendingOfferLock)
+        {
+            if (!pendingCompanionConfigBatches.TryGetValue(result.Id, out batch)
+                || batch.TargetId != user.PlatformId
+                || !(batch.ResultExpiresAt > GetUtcNow()))
+            {
+                return;
+            }
+
+            pendingCompanionConfigBatches.Remove(result.Id);
+        }
+
+        if (!result.Success)
+        {
+            VWorld.Log.LogWarning(
+                $"Skipping {batch.Configs.Count} companion config(s) for {batch.DisplayName}: shared mod install did not succeed.");
+            return;
+        }
+
+        for (int index = 0; index < batch.Configs.Count; index++)
+        {
+            VShareResolvedConfigCompanion config = batch.Configs[index];
+            InternalTransferRequest(user, TransferRequest.CreateConfig(
+                batch.PluginKey,
+                config.Source,
+                config.Target,
+                result.Id,
+                index));
+        }
+    }
+
+    static void OnSharedModCompanionsQueued(User sender, SharedModCompanionsQueued notice)
+    {
+        if (VWorld.IsClient && API.Shared.VNetwork.IsReady
+            && companionInstalls.TryGetValue(notice.ParentId, out var install))
+        {
+            install.TryKeepWaiting(sender.PlatformId, API.Shared.VNetwork.ClientSessionGeneration, GetUtcNow());
+        }
+    }
+
+    static void ReportQueuedCompanionInstalls()
+    {
+        if (!VWorld.IsServer || !API.Shared.VNetwork.IsReady)
+        {
+            return;
+        }
+
+        DateTime now = GetUtcNow();
+        if (now < nextCompanionQueueNoticeUtc)
+        {
+            return;
+        }
+
+        nextCompanionQueueNoticeUtc = now.Add(companionQueueNoticeInterval);
+        QueuedOutgoingTransfer[] queued;
+        lock (outgoingTransferLock)
+        {
+            queued = outgoingTransferScheduler.SnapshotQueued();
+        }
+
+        // Progress for a waiting batch is independent of the chunk timeout once a transfer starts.
+        HashSet<(ulong, Guid)> reported = [];
+        foreach (var transfer in queued)
+        {
+            Guid parentId = transfer.Request.ParentTransferId;
+            if (transfer.Request.AssetKind == VShareTransferAssetKind.Config
+                && reported.Add((transfer.TargetId, parentId)))
+            {
+                API.Shared.VNetwork.SendToClient(transfer.Target, new SharedModCompanionsQueued(parentId));
+            }
+        }
+    }
+
     /// <summary>
     /// Handles a client decline by clearing the pending offer on the server.
     /// </summary>
@@ -1218,6 +1694,7 @@ internal static class Transference
             }
 
             pendingServerOffers.Remove(decline.Id);
+            pendingCompanionConfigBatches.Remove(decline.Id);
         }
 
         VWorld.Log.LogWarning(
@@ -1288,6 +1765,12 @@ internal static class Transference
             {
                 pendingServerOffers.Remove(offer.Offer.Id);
             }
+
+            foreach (Guid id in pendingCompanionConfigBatches
+                .Where(entry => entry.Value.TargetId == targetId).Select(entry => entry.Key).ToArray())
+            {
+                pendingCompanionConfigBatches.Remove(id);
+            }
         }
 
         foreach (var offer in removedOffers)
@@ -1312,6 +1795,12 @@ internal static class Transference
     }
     static IEnumerator IncomingRoutine(TransferComplete complete, IncomingTransfer incoming)
     {
+        if (incoming.AssetKind == VShareTransferAssetKind.Config)
+        {
+            yield return IncomingConfigRoutine(incoming);
+            yield break;
+        }
+
         bool isZip = incoming.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
         string filePath = isZip ? string.Empty : Path.Combine(Paths.PluginPath, incoming.FileName);
         string tempFilePath = BuildIncomingTempFilePath(incoming.FileName, incoming.Id);
@@ -1319,12 +1808,25 @@ internal static class Transference
 
         if (!isZip && !TryHandleExistingDll(filePath, incoming, allowOverwrite))
         {
+            RejectIncomingMod(incoming, VShareNoticeOutcome.ExistingFilesKept);
             yield break;
         }
 
         byte[] computedHash = Array.Empty<byte>();
-        FileStream outputStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
+        FileStream outputStream;
+        try
+        {
+            outputStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
+        }
+        catch (Exception ex)
+        {
+            VWorld.Log.LogError($"Failed to open temporary file for {incoming.FileName}: {ex}");
+            RejectIncomingMod(incoming);
+            yield break;
+        }
+
         SHA256 sha = SHA256.Create();
+        Exception decompressionError = null;
         var decompressionRoutine = DecompressChunkRoutine(
             incoming.Concat(),
             slice =>
@@ -1333,7 +1835,8 @@ internal static class Transference
                 sha.TransformBlock(slice, 0, slice.Length, null, 0);
             },
             () => { },
-            incoming.Id);
+            incoming.Id,
+            error => decompressionError = error);
 
         while (true)
         {
@@ -1348,6 +1851,7 @@ internal static class Transference
                 outputStream.Dispose();
                 sha.Dispose();
                 DeleteTemporaryFileIfPresent(tempFilePath);
+                RejectIncomingMod(incoming);
                 yield break;
             }
 
@@ -1359,32 +1863,68 @@ internal static class Transference
             yield return decompressionRoutine.Current;
         }
 
-        sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
-        computedHash = sha.Hash ?? Array.Empty<byte>();
-        outputStream.Dispose();
-        sha.Dispose();
+        try
+        {
+            outputStream.Dispose();
+            if (decompressionError is null)
+            {
+                sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+                computedHash = sha.Hash ?? Array.Empty<byte>();
+            }
+        }
+        catch (Exception ex)
+        {
+            decompressionError ??= ex;
+        }
+        finally
+        {
+            sha.Dispose();
+        }
+
+        if (decompressionError is not null)
+        {
+            VWorld.Log.LogError($"Failed to write decompressed payload for {incoming.FileName}: {decompressionError}");
+            DeleteTemporaryFileIfPresent(tempFilePath);
+            RejectIncomingMod(incoming);
+            yield break;
+        }
 
         if (!incoming.TryValidateReleaseAssetDigest(computedHash, isZip, out string validationError))
         {
             VWorld.Log.LogWarning(validationError);
             DeleteTemporaryFileIfPresent(tempFilePath);
+            RejectIncomingMod(incoming);
             yield break;
         }
 
         if (isZip)
         {
-            using var archiveStream = File.OpenRead(tempFilePath);
-            using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read);
+            ZipArchive archive;
+            try
+            {
+                archive = ZipFile.OpenRead(tempFilePath);
+            }
+            catch (Exception ex)
+            {
+                VWorld.Log.LogError($"Failed to open ZIP transfer for {incoming.FileName}: {ex}");
+                DeleteTemporaryFileIfPresent(tempFilePath);
+                RejectIncomingMod(incoming);
+                yield break;
+            }
+
+            using var incomingArchive = archive;
             if (!TryGetZipEntryDestinations(archive, Paths.GameRootPath, incoming.FileName, out var destinations))
             {
                 VWorld.Log.LogWarning($"Aborting transfer for {incoming.FileName} due to invalid zip entry.");
                 DeleteTemporaryFileIfPresent(tempFilePath);
+                RejectIncomingMod(incoming);
                 yield break;
             }
 
             if (!TryHandleZipCollisions(destinations, incoming.FileName, allowOverwrite))
             {
                 DeleteTemporaryFileIfPresent(tempFilePath);
+                RejectIncomingMod(incoming, VShareNoticeOutcome.ExistingFilesKept);
                 yield break;
             }
 
@@ -1400,6 +1940,7 @@ internal static class Transference
                 {
                     VWorld.Log.LogError($"Zip extraction failed: {ex}");
                     DeleteTemporaryFileIfPresent(tempFilePath);
+                    RejectIncomingMod(incoming);
                     yield break;
                 }
 
@@ -1413,6 +1954,7 @@ internal static class Transference
 
             VWorld.Log.LogInfo($"[VShare] Extracted {incoming.FileName} to {Paths.GameRootPath}.");
             DeleteTemporaryFileIfPresent(tempFilePath);
+            yield return FinishSharedModInstall(incoming, hotload: false, filePath);
 
             yield break;
         }
@@ -1421,20 +1963,168 @@ internal static class Transference
         {
             FinalizeIncomingFile(tempFilePath, filePath, allowOverwrite);
             VWorld.Log.LogInfo(FormatTransferCompleteMessage(incoming.FileName, incoming.TotalBytes));
-
-            if (complete.Hotload)
-            {
-                VWorld.Log.LogInfo($"[VShare] Loading plugin: {incoming.FileName}.");
-                LogHotloadPluginResult(filePath, LoadPlugin(filePath));
-            }
         }
         catch (Exception ex)
         {
-            VWorld.Log.LogError($"File write / load error: {ex}");
+            VWorld.Log.LogError($"File write error: {ex}");
             DeleteTemporaryFileIfPresent(tempFilePath);
+            RejectIncomingMod(incoming);
+            yield break;
         }
 
-        // VNetwork.SendToServer(new FileAck(done.Id, success));
+        yield return FinishSharedModInstall(incoming, complete.Hotload, filePath);
+    }
+
+    static IEnumerator FinishSharedModInstall(IncomingTransfer incoming, bool hotload, string filePath)
+    {
+        IReadOnlyList<VShareManagedConfigWrite> appliedConfigs = null;
+        int configsKept = 0;
+        if (incoming.CompanionCount > 0)
+        {
+            long generation = incoming.ClientSessionGeneration;
+            if (!API.Shared.VNetwork.IsReady || API.Shared.VNetwork.ClientSessionGeneration != generation)
+            {
+                yield break;
+            }
+
+            var install = new VShareCompanionInstall(
+                incoming.CompanionCount, incoming.SourcePlatformId, generation, GetUtcNow(), incomingTransferTimeout);
+            if (!companionInstalls.TryAdd(incoming.Id, install))
+            {
+                yield break;
+            }
+
+            try
+            {
+                // Acknowledge the verified disk install, not the activation that depends on these configs.
+                SendSharedModInstallResult(incoming.Id, success: true);
+                while (!install.IsComplete && !install.Failed
+                    && API.Shared.VNetwork.IsReady
+                    && install.IsCurrent(API.Shared.VNetwork.ClientSessionGeneration, GetUtcNow()))
+                {
+                    yield return null;
+                }
+
+                if (!install.IsComplete || !API.Shared.VNetwork.IsReady
+                    || API.Shared.VNetwork.ClientSessionGeneration != generation)
+                {
+                    VWorld.Log.LogWarning(
+                        $"[VShare] Companion configs did not finish for {incoming.FileName}; the mod was saved but not hotloaded.");
+                    if (API.Shared.VNetwork.IsReady && API.Shared.VNetwork.ClientSessionGeneration == generation)
+                    {
+                        FinishModNotice(incoming, install.Failed
+                            ? VShareNoticeOutcome.ConfigFailed : VShareNoticeOutcome.ConfigTimedOut);
+                    }
+
+                    yield break;
+                }
+
+                appliedConfigs = install.AppliedConfigs;
+                configsKept = install.PreservedConfigCount;
+            }
+            finally
+            {
+                companionInstalls.Remove(incoming.Id);
+            }
+        }
+
+        VShareNoticeOutcome outcome = VShareNoticeOutcome.Installed;
+        if (hotload)
+        {
+            try
+            {
+                VWorld.Log.LogInfo($"[VShare] Loading plugin: {incoming.FileName}.");
+                HotloadPluginResult result = TryLoadPlugin(filePath, appliedConfigs);
+                LogHotloadPluginResult(filePath, result);
+                outcome = result.Success ? VShareNoticeOutcome.Ready : VShareNoticeOutcome.LoadFailed;
+            }
+            catch (Exception ex)
+            {
+                VWorld.Log.LogError($"Plugin load error for {incoming.FileName}: {ex}");
+                outcome = VShareNoticeOutcome.LoadFailed;
+            }
+        }
+
+        FinishModNotice(incoming, outcome, appliedConfigs?.Count ?? 0, configsKept);
+    }
+
+    static void RejectIncomingMod(IncomingTransfer incoming, VShareNoticeOutcome outcome = VShareNoticeOutcome.Failed)
+    {
+        FinishModNotice(incoming, outcome);
+        SendSharedModInstallResult(incoming.Id, success: false);
+    }
+
+    static void FinishModNotice(IncomingTransfer incoming, VShareNoticeOutcome outcome, int applied = 0, int kept = 0)
+        => VShareClientNotices.Current.Finish(incoming.Id, incoming.FileName, incoming.ClientSessionGeneration, outcome, applied, kept);
+
+    static IEnumerator IncomingConfigRoutine(IncomingTransfer incoming)
+    {
+        if (!TryGetActiveCompanionInstall(incoming, out var install))
+        {
+            yield break;
+        }
+
+        using var decompressedStream = new MemoryStream();
+        bool decompressed = false;
+        Exception decompressionError = null;
+        EnqueueTransferWorkItem(new TransferDecompressionWorkItem(
+            incoming.Id,
+            incoming.Concat(),
+            slice => decompressedStream.Write(slice, 0, slice.Length),
+            () => decompressed = true,
+            error => decompressionError = error));
+
+        while (!decompressed && decompressionError is null)
+        {
+            yield return null;
+        }
+
+        if (!TryGetActiveCompanionInstall(incoming, out install))
+        {
+            yield break;
+        }
+
+        if (decompressionError is not null)
+        {
+            VWorld.Log.LogError($"Failed to decompress companion config {incoming.ConfigTarget}: {decompressionError}");
+            install.Finish(incoming.CompanionIndex, incoming.Id, resolved: false);
+            yield break;
+        }
+
+        VShareConfigApplyResult result = VShareConfigCompanion.ApplyClientConfig(
+            decompressedStream.ToArray(),
+            incoming.ConfigPluginKey,
+            incoming.ConfigPluginKey,
+            incoming.ConfigSource,
+            incoming.ConfigTarget,
+            DateTimeOffset.UtcNow);
+
+        if (result.Success)
+        {
+            VWorld.Log.LogInfo($"[VShare] Applied companion config: {incoming.ConfigTarget}.");
+        }
+        else
+        {
+            VWorld.Log.LogWarning(result.Message);
+        }
+
+        install.Finish(incoming.CompanionIndex, incoming.Id, result);
+    }
+
+    static bool TryGetActiveCompanionInstall(IncomingTransfer incoming, out VShareCompanionInstall install)
+    {
+        return companionInstalls.TryGetValue(incoming.ParentTransferId, out install)
+            && API.Shared.VNetwork.IsReady
+            && install.CanApply(incoming.CompanionIndex, incoming.Id, incoming.SourcePlatformId,
+                API.Shared.VNetwork.ClientSessionGeneration, GetUtcNow());
+    }
+
+    static void SendSharedModInstallResult(Guid transferId, bool success)
+    {
+        if (VWorld.IsClient && API.Shared.VNetwork.IsReady)
+        {
+            API.Shared.VNetwork.SendToServer(new SharedModInstallResult(transferId, success));
+        }
     }
 
     /// <summary>
@@ -1460,6 +2150,7 @@ internal static class Transference
         while (true)
         {
             CleanupExpiredOffers();
+            ReportQueuedCompanionInstalls();
             yield return offerCleanupDelay;
         }
     }
@@ -1727,7 +2418,14 @@ internal static class Transference
                     foreach (var offer in expiredServerOffers)
                     {
                         pendingServerOffers.Remove(offer.Offer.Id);
+                        pendingCompanionConfigBatches.Remove(offer.Offer.Id);
                     }
+                }
+
+                foreach (Guid id in pendingCompanionConfigBatches
+                    .Where(entry => entry.Value.ResultExpiresAt <= now).Select(entry => entry.Key).ToArray())
+                {
+                    pendingCompanionConfigBatches.Remove(id);
                 }
             }
         }
@@ -1815,6 +2513,17 @@ internal static class Transference
 
         foreach (IncomingTransfer transfer in expiredTransfers)
         {
+            if (transfer.AssetKind == VShareTransferAssetKind.Mod)
+            {
+                FinishModNotice(transfer, VShareNoticeOutcome.TimedOut);
+            }
+
+            if (transfer.AssetKind == VShareTransferAssetKind.Config
+                && TryGetActiveCompanionInstall(transfer, out var install))
+            {
+                install.Finish(transfer.CompanionIndex, transfer.Id, resolved: false);
+            }
+
             TimeSpan idleDuration = now - transfer.LastChunkUtc;
             IncomingTransferTimedOut?.Invoke(transfer, idleDuration);
             LogIncomingTransferTimeout(transfer, idleDuration);
@@ -2101,7 +2810,15 @@ internal static class Transference
                 VWorld.Log?.LogWarning("Didn't pass SHA-256 verification...");
             }
 
-            // VNetwork.SendToServer(new FileAck(transferId, false));
+            if (incoming.AssetKind == VShareTransferAssetKind.Mod)
+            {
+                RejectIncomingMod(incoming);
+            }
+            else if (TryGetActiveCompanionInstall(incoming, out var install))
+            {
+                install.Finish(incoming.CompanionIndex, transferId, resolved: false);
+            }
+
             incomingTransfers.Remove(transferId);
         }
     }
@@ -2129,7 +2846,8 @@ internal static class Transference
     static HotloadPluginResult LoadPlugin(string filePath)
         => TryLoadPlugin(filePath);
 
-    static HotloadPluginResult TryLoadPlugin(string filePath)
+    static HotloadPluginResult TryLoadPlugin(
+        string filePath, IReadOnlyList<VShareManagedConfigWrite> appliedConfigs = null)
     {
         if (!File.Exists(filePath))
         {
@@ -2200,6 +2918,11 @@ internal static class Transference
                 assembly.GetName().Name);
         }
 
+        var managedConfig = appliedConfigs?.Count > 0
+            ? VShareConfigCompanion.CaptureBeforeHotload(
+                Paths.ConfigPath, VShareConfigCompanion.ManagedConfigsManifestPath, metadata.GUID, appliedConfigs)
+            : null;
+
         BasePlugin plugin;
         try
         {
@@ -2231,6 +2954,12 @@ internal static class Transference
                 metadata.Name,
                 metadata.Version.ToString(),
                 assembly.GetName().Name);
+        }
+
+        if (managedConfig is not null
+            && VShareConfigCompanion.RetainAfterHotload(VShareConfigCompanion.ManagedConfigsManifestPath, managedConfig))
+        {
+            VWorld.Log.LogInfo($"[VShare] Retained ownership of {managedConfig.Write.Target} after BepInEx rewrote comments.");
         }
 
         return new(
@@ -2424,11 +3153,13 @@ internal static class Transference
     /// <param name="onSlice">Callback invoked for each decompressed slice.</param>
     /// <param name="onComplete">Callback invoked when decompression finishes.</param>
     /// <param name="transferId">The transfer identifier for work queue logging.</param>
+    /// <param name="onError">Optional callback for a failed decompression step.</param>
     public static IEnumerator DecompressChunkRoutine(
         byte[] compressedBuffer,
         Action<byte[]> onSlice,
         Action onComplete,
-        Guid transferId = default)
+        Guid transferId = default,
+        Action<Exception> onError = null)
     {
         if (compressedBuffer is null)
         {
@@ -2446,18 +3177,27 @@ internal static class Transference
         }
 
         bool Completed = false;
+        bool failed = false;
         EnqueueTransferWorkItem(new TransferDecompressionWorkItem(
             transferId,
             compressedBuffer,
             onSlice,
-            () => Completed = true));
+            () => Completed = true,
+            onError is null ? null : error =>
+            {
+                failed = true;
+                onError(error);
+            }));
 
-        while (!Completed)
+        while (!Completed && !failed)
         {
             yield return null;
         }
 
-        onComplete();
+        if (!failed)
+        {
+            onComplete();
+        }
     }
 
     /// <summary>
@@ -2479,6 +3219,10 @@ internal static class Transference
         public Guid Id;
         public int TotalBytes;
         public string FileName;
+        public VShareTransferAssetKind AssetKind;
+        public string ConfigPluginKey;
+        public string ConfigSource;
+        public string ConfigTarget;
         public byte[] Sha = [];
         public byte[] ReleaseAssetSha = [];
         public int ExpectedChunkCount;
@@ -2500,6 +3244,10 @@ internal static class Transference
         /// Gets the platform identifier for the transfer source.
         /// </summary>
         public ulong SourcePlatformId { get; }
+        public long ClientSessionGeneration { get; }
+        public Guid ParentTransferId { get; }
+        public int CompanionIndex { get; }
+        public int CompanionCount { get; }
         /// <summary>
         /// Gets whether a GitHub Release asset digest was provided for this transfer.
         /// </summary>
@@ -2509,6 +3257,14 @@ internal static class Transference
         {
             Id = session.Id;
             FileName = session.FileNameString;
+            AssetKind = session.AssetKind;
+            ConfigPluginKey = session.ConfigPluginKeyString;
+            ConfigSource = session.ConfigSourceString;
+            ConfigTarget = session.ConfigTargetString;
+            ParentTransferId = session.ParentTransferId;
+            CompanionIndex = session.CompanionIndex;
+            CompanionCount = session.CompanionCount;
+            ClientSessionGeneration = API.Shared.VNetwork.ClientSessionGeneration;
             TotalBytes = session.TotalBytes;
             Sha = session.Sha256Bytes;
             ReleaseAssetSha = session.ReleaseAssetSha256Bytes;
@@ -2534,7 +3290,10 @@ internal static class Transference
         /// <param name="bytes">The chunk payload bytes.</param>
         public void AddChunk(int idx, byte[] bytes)
         {
-            LastChunkUtc = GetUtcNow();
+            if (AssetKind == VShareTransferAssetKind.Mod)
+            {
+                LastChunkUtc = GetUtcNow();
+            }
 
             if (idx < 0 || idx >= ExpectedChunkCount)
             {
@@ -2563,6 +3322,14 @@ internal static class Transference
             _chunks[idx] = bytes;
             ReceivedBytes += bytes.Length;
             ReceivedChunkCount++;
+            if (AssetKind == VShareTransferAssetKind.Config)
+            {
+                LastChunkUtc = GetUtcNow();
+                if (companionInstalls.TryGetValue(ParentTransferId, out var install))
+                {
+                    install.RecordChunk(CompanionIndex, Id, SourcePlatformId, ClientSessionGeneration, LastChunkUtc);
+                }
+            }
 
             if (ShouldLogTransferProgress(
                 ReceivedBytes,
@@ -2572,6 +3339,11 @@ internal static class Transference
             {
                 LastLoggedProgressPercent = nextLoggedProgressPercent;
                 VWorld.Log?.LogInfo(FormatTransferProgressMessage(FileName, ReceivedBytes, TotalBytes));
+                if (AssetKind == VShareTransferAssetKind.Mod)
+                {
+                    VShareClientNotices.Current.Progress(
+                        Id, FileName, ClientSessionGeneration, nextLoggedProgressPercent, ReceivedBytes >= TotalBytes);
+                }
             }
         }
         /// <summary>
@@ -2809,6 +3581,7 @@ internal static class Transference
         readonly byte[] compressedBuffer;
         readonly Action<byte[]> onSlice;
         readonly Action onComplete;
+        readonly Action<Exception> onError;
         int offset;
         bool completed;
 
@@ -2819,16 +3592,19 @@ internal static class Transference
         /// <param name="compressedBuffer">The compressed buffer to decompress.</param>
         /// <param name="onSlice">Callback invoked for each decompressed slice.</param>
         /// <param name="onComplete">Callback invoked when decompression finishes.</param>
+        /// <param name="onError">Optional callback for a failed decompression step.</param>
         public TransferDecompressionWorkItem(
             Guid transferId,
             byte[] compressedBuffer,
             Action<byte[]> onSlice,
-            Action onComplete)
+            Action onComplete,
+            Action<Exception> onError = null)
         {
             TransferId = transferId;
             this.compressedBuffer = compressedBuffer ?? throw new ArgumentNullException(nameof(compressedBuffer));
             this.onSlice = onSlice ?? throw new ArgumentNullException(nameof(onSlice));
             this.onComplete = onComplete ?? throw new ArgumentNullException(nameof(onComplete));
+            this.onError = onError;
         }
 
         /// <summary>
@@ -2841,6 +3617,20 @@ internal static class Transference
         /// </summary>
         /// <returns><c>true</c> when decompression is complete; otherwise, <c>false</c>.</returns>
         public bool TryExecuteStep()
+        {
+            try
+            {
+                return DecompressStep();
+            }
+            catch (Exception ex) when (onError is not null)
+            {
+                completed = true;
+                onError(ex);
+                return true;
+            }
+        }
+
+        bool DecompressStep()
         {
             if (completed)
             {
@@ -3250,6 +4040,19 @@ internal static class Transference
         public TransferRequest Request { get; } = request;
         public ulong TargetId { get; } = targetId;
         public DateTime ExpiresAt { get; } = expiresAt;
+    }
+
+    class PendingCompanionConfigBatch(
+        ulong targetId,
+        string pluginKey,
+        string displayName,
+        IReadOnlyList<VShareResolvedConfigCompanion> configs)
+    {
+        public ulong TargetId { get; } = targetId;
+        public string PluginKey { get; } = pluginKey ?? string.Empty;
+        public string DisplayName { get; } = displayName ?? string.Empty;
+        public IReadOnlyList<VShareResolvedConfigCompanion> Configs { get; } = configs ?? [];
+        public DateTime? ResultExpiresAt { get; set; }
     }
 
     /// <summary>
@@ -3862,7 +4665,75 @@ internal static class Transference
             metadata.GitHubTag,
             entry.FileName,
             entry.IsZip,
-            hotload);
+            hotload,
+            GetCompanionConfigCount(metadata));
+
+    static int GetCompanionConfigCount(PluginShareMetadataStore.PluginShareMetadata metadata)
+        => metadata.Configs?.Count ?? 0;
+
+    static IReadOnlyList<VShareResolvedConfigCompanion> ResolveCompanionConfigEntries(
+        SharedModEntry entry,
+        PluginShareMetadataStore.PluginShareMetadata metadata)
+    {
+        if (metadata.Configs is null || metadata.Configs.Count == 0)
+        {
+            return [];
+        }
+
+        string pluginKey = GetSharedModPluginKey(entry);
+        string displayName = string.IsNullOrWhiteSpace(pluginKey) ? entry.BaseName : pluginKey;
+        var configs = new List<VShareResolvedConfigCompanion>(metadata.Configs.Count);
+        foreach (PluginShareMetadataStore.PluginShareConfigMetadata config in metadata.Configs)
+        {
+            if (!VShareConfigCompanion.TryResolveServerConfigSource(
+                    pluginKey,
+                    config.Source,
+                    out _,
+                    out string sourceError))
+            {
+                VWorld.Log?.LogWarning(
+                    $"Skipping companion config for {displayName}: {sourceError}");
+                continue;
+            }
+
+            if (!VShareConfigCompanion.TryValidateClientConfigTargetSyntax(config.Target, out string targetError))
+            {
+                VWorld.Log?.LogWarning(
+                    $"Skipping companion config for {displayName}: {targetError}");
+                continue;
+            }
+
+            configs.Add(new VShareResolvedConfigCompanion(pluginKey, displayName, config.Source, config.Target));
+        }
+
+        return configs;
+    }
+
+    static string GetSharedModPluginKey(SharedModEntry entry)
+        => string.IsNullOrWhiteSpace(entry.MetadataBaseName)
+            ? entry.BaseName
+            : entry.MetadataBaseName;
+
+    static void StorePendingCompanionConfigBatch(
+        User user,
+        Guid offerId,
+        SharedModEntry entry,
+        IReadOnlyList<VShareResolvedConfigCompanion> configs)
+    {
+        string pluginKey = GetSharedModPluginKey(entry);
+        string displayName = string.IsNullOrWhiteSpace(pluginKey) ? entry.BaseName : pluginKey;
+        lock (pendingOfferLock)
+        {
+            pendingCompanionConfigBatches[offerId] = new PendingCompanionConfigBatch(
+                user.PlatformId,
+                pluginKey,
+                displayName,
+                configs);
+        }
+
+        VWorld.Log?.LogInfo(
+            $"[VShare] Queued {configs.Count} companion config(s) for {displayName} after shared mod install.");
+    }
 
     /// <summary>
     /// Builds the VShare request-button detail text from the latest server preview.
@@ -3873,17 +4744,17 @@ internal static class Transference
     {
         if (entries is null)
         {
-            return SHARED_MODS_MENU_HEADER +
+            return SHARED_MODS_MENU_PREAMBLE +
                 "\n- Waiting for server details.";
         }
 
         if (entries.Count == 0)
         {
-            return SHARED_MODS_MENU_HEADER +
+            return SHARED_MODS_MENU_PREAMBLE +
                 "\n- No server-shared mods advertised by this server.";
         }
 
-        var builder = new StringBuilder(SHARED_MODS_MENU_HEADER);
+        var builder = new StringBuilder(SHARED_MODS_MENU_PREAMBLE);
 
         int entryCount = Math.Min(entries.Count, MAX_SHARED_MOD_PREVIEW_ENTRIES);
         for (int i = 0; i < entryCount; i++)
@@ -3895,6 +4766,7 @@ internal static class Transference
             string fileName = SanitizePreviewText(entry.FileName, entry.IsZip ? "unknown.zip" : "unknown.dll");
             string fileType = entry.IsZip ? "ZIP" : "DLL";
             string runtimeLoad = entry.Hotload ? "enabled" : "disabled";
+            int configCount = Math.Max(0, entry.ConfigCount);
 
             builder.AppendLine();
             builder.Append("- ");
@@ -3911,6 +4783,11 @@ internal static class Transference
             builder.AppendLine(")");
             builder.Append("  Runtime load: ");
             builder.AppendLine(runtimeLoad);
+            if (configCount > 0)
+            {
+                builder.Append("  Config files: ");
+                builder.AppendLine(configCount.ToString());
+            }
         }
 
         if (entries.Count > entryCount)
@@ -4072,11 +4949,13 @@ internal static class Transference
     readonly struct SharedModOfferCandidate(
         SharedModEntry entry,
         PluginShareMetadataStore.PluginShareMetadata metadata,
-        bool hotload)
+        bool hotload,
+        IReadOnlyList<VShareResolvedConfigCompanion> companionConfigs)
     {
         public SharedModEntry Entry { get; } = entry;
         public PluginShareMetadataStore.PluginShareMetadata Metadata { get; } = metadata;
         public bool Hotload { get; } = hotload;
+        public IReadOnlyList<VShareResolvedConfigCompanion> CompanionConfigs { get; } = companionConfigs ?? [];
     }
 
     readonly struct SharedModEntry(string fileName, string baseName, string metadataBaseName, string sha256, bool isZip)
@@ -5346,7 +6225,10 @@ internal static class Transference
         => ClearSharedModRequestConsent(refreshMenuDescription: false);
 
     static void ClearSharedModRequestConsent()
-        => ClearSharedModRequestConsent(refreshMenuDescription: true);
+    {
+        VShareClientNotices.Current.Reset();
+        ClearSharedModRequestConsent(refreshMenuDescription: true);
+    }
 
     static void ClearSharedModRequestConsent(bool refreshMenuDescription)
     {

@@ -208,7 +208,8 @@ internal sealed class DividerEntry(string dividerText, string category, int orde
 /// <param name="category">The category identifier for the entry.</param>
 /// <param name="order">The display order for the entry.</param>
 /// <param name="onClick">The action invoked when the button is clicked.</param>
-internal sealed class ButtonEntry(string id, LocalizationKey nameKey, Func<string> getDescription, string category, int order, Action onClick) : IMenuEntry
+internal sealed class ButtonEntry(string id, LocalizationKey nameKey, LocalizationKey actionKey,
+    Func<string> getDescription, string category, int order, Action onClick) : IMenuEntry
 {
     readonly Func<string> getDescription = getDescription ?? throw new ArgumentNullException(nameof(getDescription));
     readonly Action onClick = onClick ?? throw new ArgumentNullException(nameof(onClick));
@@ -256,7 +257,7 @@ internal sealed class ButtonEntry(string id, LocalizationKey nameKey, Func<strin
             NameKey,
             new Il2CppSystem.Nullable_Unboxed<LocalizationKey>(descriptionKey),
             new Il2CppSystem.Nullable_Unboxed<LocalizationKey>(LocalizationKey.Empty),
-            new Il2CppSystem.Nullable_Unboxed<LocalizationKey>(NameKey),
+            new Il2CppSystem.Nullable_Unboxed<LocalizationKey>(actionKey),
             onClick
         );
 
