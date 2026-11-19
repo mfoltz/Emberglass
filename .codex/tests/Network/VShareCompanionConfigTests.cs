@@ -633,7 +633,7 @@ public sealed class VShareCompanionConfigTests
     public void CompanionInstall_WaitsForEverySlotIncludingProtectedSkips()
     {
         DateTime now = DateTime.UnixEpoch;
-        var install = new VShareCompanionInstall(2, 12, 7, now.AddMinutes(2));
+        var install = new VShareCompanionInstall(2, 12, 7, now, TimeSpan.FromMinutes(2));
         Guid first = Guid.NewGuid();
         Guid second = Guid.NewGuid();
 
@@ -658,7 +658,7 @@ public sealed class VShareCompanionConfigTests
     public void CompanionInstall_RejectsUnrelatedDuplicateAndExpiredTransfers()
     {
         DateTime now = DateTime.UnixEpoch;
-        var install = new VShareCompanionInstall(2, 12, 7, now.AddMinutes(2));
+        var install = new VShareCompanionInstall(2, 12, 7, now, TimeSpan.FromMinutes(2));
         Guid transferId = Guid.NewGuid();
 
         Assert.False(install.TryBegin(0, transferId, 13, 7, now));
@@ -680,7 +680,7 @@ public sealed class VShareCompanionConfigTests
         DateTime now = DateTime.UnixEpoch;
         foreach (var status in new[] { VShareConfigApplyStatus.RejectedInvalidPath, VShareConfigApplyStatus.WriteFailed })
         {
-            var install = new VShareCompanionInstall(2, 12, 7, now.AddMinutes(2));
+            var install = new VShareCompanionInstall(2, 12, 7, now, TimeSpan.FromMinutes(2));
             Guid transferId = Guid.NewGuid();
             Assert.True(install.TryBegin(0, transferId, 12, 7, now));
             install.Finish(0, transferId, VShareCompanionInstall.IsResolved(status));
@@ -688,6 +688,51 @@ public sealed class VShareCompanionConfigTests
             Assert.False(install.IsComplete);
             Assert.False(install.TryBegin(1, Guid.NewGuid(), 12, 7, now));
         }
+    }
+
+    [Fact]
+    public void CompanionInstall_QueueNoticesAndChunkProgressSurviveTheOriginalDeadline()
+    {
+        DateTime now = DateTime.UnixEpoch;
+        var install = new VShareCompanionInstall(1, 12, 7, now, TimeSpan.FromMinutes(2));
+        Guid id = Guid.NewGuid();
+
+        Assert.True(install.TryKeepWaiting(12, 7, now.AddSeconds(30)));
+        Assert.True(install.TryKeepWaiting(12, 7, now.AddSeconds(90)));
+        Assert.True(install.TryKeepWaiting(12, 7, now.AddMinutes(2)));
+        Assert.True(install.TryBegin(0, id, 12, 7, now.AddMinutes(3)));
+        Assert.False(install.TryKeepWaiting(12, 7, now.AddMinutes(4)));
+        install.RecordChunk(0, id, 12, 7, now.AddMinutes(4));
+
+        Assert.True(install.CanApply(0, id, 12, 7, now.AddMinutes(5)));
+        install.Finish(0, id, resolved: true);
+        Assert.True(install.IsComplete);
+    }
+
+    [Fact]
+    public void CompanionInstall_WrongSessionOrLateQueueNoticesCannotReviveAnExpiredWait()
+    {
+        DateTime now = DateTime.UnixEpoch;
+        var install = new VShareCompanionInstall(1, 12, 7, now, TimeSpan.FromMinutes(2));
+
+        Assert.False(install.TryKeepWaiting(13, 7, now.AddMinutes(1)));
+        Assert.False(install.TryKeepWaiting(12, 8, now.AddMinutes(1)));
+        Assert.False(install.TryKeepWaiting(12, 7, now.AddMinutes(2)));
+        Assert.False(install.TryBegin(0, Guid.NewGuid(), 12, 7, now.AddMinutes(2)));
+    }
+
+    [Fact]
+    public void CompanionInstall_StartedTransferStillExpiresWithoutValidChunks()
+    {
+        DateTime now = DateTime.UnixEpoch;
+        var install = new VShareCompanionInstall(1, 12, 7, now, TimeSpan.FromMinutes(2));
+        Guid id = Guid.NewGuid();
+        Assert.True(install.TryBegin(0, id, 12, 7, now.AddMinutes(1)));
+
+        install.RecordChunk(0, Guid.NewGuid(), 12, 7, now.AddMinutes(2));
+        install.RecordChunk(0, id, 12, 8, now.AddMinutes(2));
+        Assert.False(install.CanApply(0, id, 12, 7, now.AddMinutes(3)));
+        Assert.False(install.IsComplete);
     }
 
     [Fact]

@@ -586,6 +586,12 @@ internal static class Transference
         public readonly Guid Id = id;
         public readonly bool Success = success;
     }
+
+    readonly struct SharedModCompanionsQueued(Guid parentId)
+    {
+        public readonly Guid ParentId = parentId;
+    }
+
     readonly record struct QueuedOutgoingTransfer(Guid TransferId, User Target, TransferRequest Request) : IOutgoingTransferWork
     {
         public ulong TargetId => Target.PlatformId;
@@ -643,6 +649,7 @@ internal static class Transference
     static DateTime sharedModRequestConsentExpiresAtUtc = DateTime.MinValue;
     static long sharedModRequestConsentClientSessionGeneration = -1;
     static bool offerCleanupStarted;
+    static DateTime nextCompanionQueueNoticeUtc;
     static bool incomingCleanupStarted;
     static bool transferWorkQueueStarted;
     static bool _initialized;
@@ -711,6 +718,7 @@ internal static class Transference
     const int MAX_COLLISION_LOG_COUNT = 5;
     static readonly TimeSpan offerTimeout = TimeSpan.FromSeconds(OFFER_TIMEOUT_SECONDS);
     static readonly TimeSpan incomingTransferTimeout = TimeSpan.FromSeconds(INCOMING_TRANSFER_TIMEOUT_SECONDS);
+    static readonly TimeSpan companionQueueNoticeInterval = TimeSpan.FromSeconds(INCOMING_TRANSFER_TIMEOUT_SECONDS / 4);
     static DateTime lastTransferWorkQueueLogUtc = DateTime.MinValue;
     /// <summary>
     /// Gets or sets the provider used to resolve the current UTC time.
@@ -775,6 +783,7 @@ internal static class Transference
         Register<RequestSharedClientMods>(Direction.Serverbound, (u, o) => HandleSharedModsRequest(u, (RequestSharedClientMods)o));
         Register<SharedClientModPreview>(Direction.Clientbound, (u, o) => OnSharedClientModPreview((SharedClientModPreview)o));
         Register<SharedModInstallResult>(Direction.Serverbound, (u, o) => OnSharedModInstallResult(u, (SharedModInstallResult)o));
+        Register<SharedModCompanionsQueued>(Direction.Clientbound, (u, o) => OnSharedModCompanionsQueued(u, (SharedModCompanionsQueued)o));
 
         if (VWorld.IsServer)
         {
@@ -1613,6 +1622,48 @@ internal static class Transference
         }
     }
 
+    static void OnSharedModCompanionsQueued(User sender, SharedModCompanionsQueued notice)
+    {
+        if (VWorld.IsClient && API.Shared.VNetwork.IsReady
+            && companionInstalls.TryGetValue(notice.ParentId, out var install))
+        {
+            install.TryKeepWaiting(sender.PlatformId, API.Shared.VNetwork.ClientSessionGeneration, GetUtcNow());
+        }
+    }
+
+    static void ReportQueuedCompanionInstalls()
+    {
+        if (!VWorld.IsServer || !API.Shared.VNetwork.IsReady)
+        {
+            return;
+        }
+
+        DateTime now = GetUtcNow();
+        if (now < nextCompanionQueueNoticeUtc)
+        {
+            return;
+        }
+
+        nextCompanionQueueNoticeUtc = now.Add(companionQueueNoticeInterval);
+        QueuedOutgoingTransfer[] queued;
+        lock (outgoingTransferLock)
+        {
+            queued = outgoingTransferScheduler.SnapshotQueued();
+        }
+
+        // Progress for a waiting batch is independent of the chunk timeout once a transfer starts.
+        HashSet<(ulong, Guid)> reported = [];
+        foreach (var transfer in queued)
+        {
+            Guid parentId = transfer.Request.ParentTransferId;
+            if (transfer.Request.AssetKind == VShareTransferAssetKind.Config
+                && reported.Add((transfer.TargetId, parentId)))
+            {
+                API.Shared.VNetwork.SendToClient(transfer.Target, new SharedModCompanionsQueued(parentId));
+            }
+        }
+    }
+
     /// <summary>
     /// Handles a client decline by clearing the pending offer on the server.
     /// </summary>
@@ -1937,7 +1988,7 @@ internal static class Transference
             }
 
             var install = new VShareCompanionInstall(
-                incoming.CompanionCount, incoming.SourcePlatformId, generation, GetUtcNow().Add(incomingTransferTimeout));
+                incoming.CompanionCount, incoming.SourcePlatformId, generation, GetUtcNow(), incomingTransferTimeout);
             if (!companionInstalls.TryAdd(incoming.Id, install))
             {
                 yield break;
@@ -2099,6 +2150,7 @@ internal static class Transference
         while (true)
         {
             CleanupExpiredOffers();
+            ReportQueuedCompanionInstalls();
             yield return offerCleanupDelay;
         }
     }
@@ -3238,7 +3290,10 @@ internal static class Transference
         /// <param name="bytes">The chunk payload bytes.</param>
         public void AddChunk(int idx, byte[] bytes)
         {
-            LastChunkUtc = GetUtcNow();
+            if (AssetKind == VShareTransferAssetKind.Mod)
+            {
+                LastChunkUtc = GetUtcNow();
+            }
 
             if (idx < 0 || idx >= ExpectedChunkCount)
             {
@@ -3267,6 +3322,14 @@ internal static class Transference
             _chunks[idx] = bytes;
             ReceivedBytes += bytes.Length;
             ReceivedChunkCount++;
+            if (AssetKind == VShareTransferAssetKind.Config)
+            {
+                LastChunkUtc = GetUtcNow();
+                if (companionInstalls.TryGetValue(ParentTransferId, out var install))
+                {
+                    install.RecordChunk(CompanionIndex, Id, SourcePlatformId, ClientSessionGeneration, LastChunkUtc);
+                }
+            }
 
             if (ShouldLogTransferProgress(
                 ReceivedBytes,

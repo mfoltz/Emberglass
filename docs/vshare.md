@@ -76,7 +76,8 @@ with `.vshare-config-` are reserved from companion targets.
 Companion configs are sent only after the client verifies and installs the matching shared mod on disk. They are not
 offered by themselves, so a client that already has the mod does not receive config-only VShare traffic. For a
 hotload-enabled mod, VShare waits for every companion to be applied or intentionally skipped before loading the
-plugin. If the config phase fails, disconnects, or times out, the mod stays on disk but is not hotloaded. A later
+plugin. The server reports when companions are queued, so waiting behind other downloads does not count as inactivity.
+If the config phase fails, disconnects, or times out, the mod stays on disk but is not hotloaded. A later
 hotload failure does not undo file installs. The companion protocol is beta; use matching Emberglass builds on both ends.
 
 On the client, VShare writes companion configs into the normal BepInEx config tree. If the target file does not exist,

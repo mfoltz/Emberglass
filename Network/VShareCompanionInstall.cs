@@ -5,12 +5,14 @@ internal sealed class VShareCompanionInstall(
     int companionCount,
     ulong sourcePlatformId,
     long clientSessionGeneration,
-    DateTime expiresAt)
+    DateTime startedAt,
+    TimeSpan idleTimeout)
 {
     readonly Dictionary<int, Guid> receiving = [];
     readonly HashSet<int> resolved = [];
     readonly HashSet<Guid> transferIds = [];
     readonly List<VShareManagedConfigWrite> appliedConfigs = [];
+    DateTime expiresAt = startedAt.Add(idleTimeout);
 
     public bool Failed { get; private set; }
     public bool IsComplete => !Failed && resolved.Count == companionCount;
@@ -19,6 +21,18 @@ internal sealed class VShareCompanionInstall(
 
     public bool IsCurrent(long generation, DateTime now)
         => generation == clientSessionGeneration && now < expiresAt;
+
+    public bool TryKeepWaiting(ulong source, long generation, DateTime now)
+    {
+        if (Failed || source != sourcePlatformId || !IsCurrent(generation, now)
+            || receiving.Count + resolved.Count >= companionCount)
+        {
+            return false;
+        }
+
+        expiresAt = now.Add(idleTimeout);
+        return true;
+    }
 
     public bool TryBegin(int index, Guid transferId, ulong source, long generation, DateTime now)
     {
@@ -30,12 +44,21 @@ internal sealed class VShareCompanionInstall(
         }
 
         receiving.Add(index, transferId);
+        expiresAt = now.Add(idleTimeout);
         return true;
     }
 
     public bool CanApply(int index, Guid transferId, ulong source, long generation, DateTime now)
         => !Failed && source == sourcePlatformId && IsCurrent(generation, now)
             && receiving.TryGetValue(index, out Guid activeId) && activeId == transferId;
+
+    public void RecordChunk(int index, Guid transferId, ulong source, long generation, DateTime now)
+    {
+        if (CanApply(index, transferId, source, generation, now))
+        {
+            expiresAt = now.Add(idleTimeout);
+        }
+    }
 
     public void Finish(int index, Guid transferId, VShareConfigApplyResult result)
         => Finish(index, transferId, IsResolved(result.Status), result.ManagedWrite,

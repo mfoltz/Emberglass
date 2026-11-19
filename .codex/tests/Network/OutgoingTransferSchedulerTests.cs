@@ -92,5 +92,23 @@ public sealed class OutgoingTransferSchedulerTests
         Assert.Equal(0, scheduler.QueuedCount);
     }
 
+    [Fact]
+    public void SnapshotQueued_ExcludesActiveAndRemovedTransfers()
+    {
+        var scheduler = new OutgoingTransferScheduler<TestOutgoingTransfer>(maxActiveTransfers: 1);
+        TestOutgoingTransfer active = new(Guid.NewGuid());
+        TestOutgoingTransfer waiting = new(Guid.NewGuid());
+        TestOutgoingTransfer disconnected = new(Guid.NewGuid());
+        scheduler.EnqueueOrStart(active, _ => { });
+        scheduler.EnqueueOrStart(waiting, _ => { });
+        scheduler.EnqueueOrStart(disconnected, _ => { });
+
+        Assert.Equal(new[] { waiting, disconnected }, scheduler.SnapshotQueued());
+        scheduler.RemoveQueued(transfer => transfer == disconnected);
+        Assert.Equal(waiting, Assert.Single(scheduler.SnapshotQueued()));
+        scheduler.Complete(active.TransferId, _ => { });
+        Assert.Empty(scheduler.SnapshotQueued());
+    }
+
     readonly record struct TestOutgoingTransfer(Guid TransferId, ulong TargetId = 0) : IOutgoingTransferWork;
 }
