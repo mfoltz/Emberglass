@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.4.0
+
+- Added optional VShare companion configs that arrive with matching shared mods before hotload. VShare preserves unmanaged and locally edited configs.
+- Renamed the menu option to **Shared Mods** and its action to **Download**. The description explains where mods come from and keeps the server's mod previews.
+- Added client-only colored chat notices for download progress and outcomes.
+
 ## v0.3.2
 
 - Added handshake-populated VShare shared-mod catalog details to the client Request Shared Mods menu entry.
