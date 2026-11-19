@@ -137,7 +137,15 @@ internal sealed class PluginShareMetadataStore
         bool HotloadAllowed,
         IReadOnlyList<string> Tags,
         IReadOnlyList<string> Categories,
-        string LocalSha256);
+        string LocalSha256,
+        IReadOnlyList<PluginShareConfigMetadata> Configs = null);
+
+    /// <summary>
+    /// Describes a staged config file that should accompany a shared plugin install.
+    /// </summary>
+    /// <param name="Source">The source file path relative to the plugin's ServerConfigs folder.</param>
+    /// <param name="Target">The client config path relative to BepInEx/config.</param>
+    public readonly record struct PluginShareConfigMetadata(string Source, string Target);
 
     sealed class PluginShareMetadataPayload
     {
@@ -154,6 +162,7 @@ internal sealed class PluginShareMetadataStore
         public List<string> Tags { get; set; } = [];
         public List<string> Categories { get; set; } = [];
         public string LocalSha256 { get; set; } = string.Empty;
+        public List<PluginShareConfigMetadataEntry> Configs { get; set; } = [];
 
         public PluginShareMetadata ToMetadata()
             => new(
@@ -164,6 +173,19 @@ internal sealed class PluginShareMetadataStore
                 HotloadAllowed,
                 Tags ?? [],
                 Categories ?? [],
-                LocalSha256 ?? string.Empty);
+                LocalSha256 ?? string.Empty,
+                (Configs ?? [])
+                    .Where(config => config is not null)
+                    .Select(config => config.ToMetadata())
+                    .ToArray());
+    }
+
+    sealed class PluginShareConfigMetadataEntry
+    {
+        public string Source { get; set; } = string.Empty;
+        public string Target { get; set; } = string.Empty;
+
+        public PluginShareConfigMetadata ToMetadata()
+            => new(Source ?? string.Empty, Target ?? string.Empty);
     }
 }

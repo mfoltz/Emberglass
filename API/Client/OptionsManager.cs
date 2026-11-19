@@ -113,6 +113,10 @@ public static class OptionsManager
     /// <param name="category">The category identifier for the button.</param>
     /// <param name="onClick">The action invoked when the button is clicked.</param>
     public static void AddButton(string id, string name, Func<string> getDescription, string category, Action onClick)
+        => AddButton(id, name, name, getDescription, category, onClick);
+
+    internal static void AddButton(
+        string id, string name, string actionLabel, Func<string> getDescription, string category, Action onClick)
     {
         if (!_buttonIds.Add(id))
         {
@@ -122,8 +126,9 @@ public static class OptionsManager
         var localizationKey = GetOrCreateCategoryKey(category);
         var order = GetNextOrder();
         var nameKey = LocalizationKeyManager.GetLocalizationKey(name);
+        var actionKey = actionLabel == name ? nameKey : LocalizationKeyManager.GetLocalizationKey(actionLabel);
 
-        _categoryEntries[localizationKey].Add(new ButtonEntry(id, nameKey, getDescription, category, order, onClick));
+        _categoryEntries[localizationKey].Add(new ButtonEntry(id, nameKey, actionKey, getDescription, category, order, onClick));
     }
 
     /// <summary>

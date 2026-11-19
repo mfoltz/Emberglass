@@ -34,6 +34,19 @@ public sealed class OptionsManagerButtonTests
         Assert.Contains("AwakePostfix(OptionsMenu __instance)", patches);
     }
 
+    [Fact]
+    public void VShareButton_UsesIndependentActionLabelWithoutChangingPublicDefault()
+    {
+        string options = File.ReadAllText(FindRepositoryFile("API", "Client", "OptionsManager.cs"));
+        string entry = File.ReadAllText(FindRepositoryFile("API", "Client", "MenuEntries.cs"));
+        string init = File.ReadAllText(FindRepositoryFile("Patches", "Shared", "OnInitialize.cs"));
+        Assert.Contains("AddButton(id, name, name, getDescription, category, onClick)", options);
+        Assert.Contains("new ButtonEntry(id, nameKey, actionKey,", options);
+        Assert.Contains("new Il2CppSystem.Nullable_Unboxed<LocalizationKey>(actionKey)", entry);
+        Assert.Matches("\"emberglass\\.request_shared_mods\",\\s*\"Shared Mods\",\\s*\"Download\"", init);
+        Assert.Contains("Transference.RequestSharedModsFromMenu()", init);
+    }
+
     static string FindRepositoryFile(params string[] relativeParts)
     {
         string current = AppContext.BaseDirectory;

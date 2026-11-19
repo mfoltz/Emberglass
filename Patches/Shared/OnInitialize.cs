@@ -44,7 +44,8 @@ internal static class GameBootstrapPatch
                 OptionsMenuPatches.Initialize();
                 OptionsManager.AddButton(
                     "emberglass.request_shared_mods",
-                    "Request Shared Mods",
+                    "Shared Mods",
+                    "Download",
                     Transference.GetSharedModsMenuDescription,
                     MyPluginInfo.PLUGIN_NAME,
                     () =>

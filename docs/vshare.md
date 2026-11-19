@@ -9,32 +9,87 @@ downloads from the server they joined.
 
 ## Directory Layout
 
-Emberglass expects two staging folders under `BepInEx/config`:
+Emberglass uses these staging locations under `BepInEx/config`:
 
 * `LocalMods` - Server-local mods that are hotloaded or used only on the server.
 * `Server` - Clientbound packages that may be offered to connected clients.
+* `ServerConfigs/<PluginKey>` - Optional companion config files for a matching shared mod.
 
-These folders are created automatically when the server initializes the VShare system.
+The server creates the staging roots automatically. Operators create the per-plugin folders under `ServerConfigs`.
 
 ## Requesting Shared Mods (Client)
 
-Clients initiate a request from the in-game options menu. Emberglass adds the menu button via
-`OptionsManager.AddButton` in `Patches/Shared/OnInitialize.cs` with the label **"Request Shared Mods"**. Selecting it
+Clients initiate a request from the in-game options menu. On the **Shared Mods** row, selecting **Download**
 sends a request to the server to offer any server-staged mods that the client does not yet have. The click also acts as
 consent for catalog-listed shared-mod offers returned immediately after the request, so the request flow stays one-click
 for mods advertised in the server details.
 
 The same button's hover/details text is populated from the server after the authenticated VNetwork handshake. It lists
 the current server-advertised shared mods with the mod name, GitHub source, release tag, staged file name, file type, and
-runtime-load status. Before the server catalog arrives, the details text reports that it is waiting for server details.
-If the server advertises no shared mods, it reports that no server-shared mods are advertised by this server.
+runtime-load status. When a staged mod has companion configs, the details text shows the config count for that mod.
+Before the server catalog arrives, the details text reports that it is waiting for server details. If the server
+advertises no shared mods, it reports that no server-shared mods are advertised by this server.
 
 ## Consent and Offer Flow
 
-VShare is opt-in. Selecting **"Request Shared Mods"** is the client consent action for shared clientbound mods. The
+VShare is opt-in. Selecting **Download** is the client consent action for shared clientbound mods. The
 server responds with transfer offers for each eligible missing mod, and offers received shortly after that request are
 accepted automatically only when they match the latest server-advertised catalog, so the initial flow stays one-button
 from the player's perspective while still being bounded by the handshake details.
+
+Accepted mod transfers show start, progress, and outcome notices in the downloading client's chatbox. Companion configs
+are summarized in the mod's outcome. **Ready** means runtime loading succeeded; **Installed** means the files are on disk
+without a runtime load. Detailed transfer and verification logs remain in the console.
+
+## Companion Config Files
+
+Shared mod metadata can declare config files that should travel with that mod:
+
+```json
+{
+  "Plugins": {
+    "Eclipse": {
+      "GitHubRepo": "mfoltz/Eclipse",
+      "GitHubTag": "v1.3.14-pre",
+      "GitHubAssetName": "Eclipse.dll",
+      "ClientSafe": true,
+      "HotloadAllowed": true,
+      "Configs": [
+        {
+          "Source": "io.zfolmt.Eclipse.cfg",
+          "Target": "io.zfolmt.Eclipse.cfg"
+        }
+      ],
+      "Tags": ["client"],
+      "Categories": []
+    }
+  }
+}
+```
+
+`Source` is relative to `BepInEx/config/ServerConfigs/<PluginKey>`. `Target` is relative to the client's
+`BepInEx/config` folder. Both paths may name nested files, but must be relative and fit the packet's UTF-8 path fields.
+Emberglass rejects traversal, invalid filenames and Windows aliases, missing staged sources, directories in place of files,
+and symlinks, junctions, or other reparse points along the resolved path. `BepInEx/config/Emberglass` and names starting
+with `.vshare-config-` are reserved from companion targets.
+
+Companion configs are sent only after the client verifies and installs the matching shared mod on disk. They are not
+offered by themselves, so a client that already has the mod does not receive config-only VShare traffic. For a
+hotload-enabled mod, VShare waits for every companion to be applied or intentionally skipped before loading the
+plugin. If the config phase fails, disconnects, or times out, the mod stays on disk but is not hotloaded. A later
+hotload failure does not undo file installs. The companion protocol is beta; use matching Emberglass builds on both ends.
+
+On the client, VShare writes companion configs into the normal BepInEx config tree. If the target file does not exist,
+VShare writes it and records the file in `BepInEx/config/Emberglass/VShareManagedConfigs.json`. If the target already
+exists, VShare overwrites it only when that manifest proves the file was previously written by VShare and the current
+file hash still matches the recorded hash. User-edited or unmanaged local configs are skipped with a log receipt.
+VShare stages the config and manifest separately and publishes the manifest last. A damaged or unreadable manifest
+does not grant overwrite permission. If the manifest cannot be published, VShare attempts to restore the previous file
+without touching any newer local change. A recovery backup is retained if that restore cannot finish. The two files
+are not updated as one transaction: if interrupted between writes, any unrecorded config is treated as local and kept.
+During successful hotload, VShare can refresh that hash for a just-applied `<plugin-guid>.cfg` if BepInEx generates
+its config header and only comments or blank lines changed. This does not adopt existing files or relax the exact
+hash check for later edits.
 
 ## Transfer Throttling
 
@@ -98,8 +153,8 @@ Examples:
 
 ## Automatic Staging Folder Creation
 
-When VShare initializes on the server, it creates the `LocalMods` and `Server` staging folders automatically. This
-means administrators can drop files into those locations without pre-creating the directories.
+When VShare initializes on the server, it creates the `LocalMods`, `Server`, and `ServerConfigs` staging roots.
+Create a plugin's subfolder inside `ServerConfigs` when staging its companion files.
 
 ## Provenance Ladder
 

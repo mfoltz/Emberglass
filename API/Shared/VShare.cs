@@ -56,6 +56,7 @@ internal static class VShare
         }
         Directory.CreateDirectory(_localModsPath);
         Directory.CreateDirectory(_serverModsPath);
+        VShareConfigCompanion.EnsureDirectories();
         RefreshAllCaches();
         InitializeWatchers();
     }
